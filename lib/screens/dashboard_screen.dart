@@ -12,7 +12,7 @@ class DashboardScreen extends StatefulWidget {
   final CalculationResult result;
   final String? imageUrl;
   final String? listingUrl;
-  DashboardScreen({
+  const DashboardScreen({
     super.key,
     required this.result,
     this.imageUrl,
@@ -119,57 +119,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             ? (_res.comparableCount >= 3 ? _res.comparableCount : 3)
             : 0,
         proCosts: newProCosts,
-        vatOnMargin: _res.vatOnMargin,
-      );
-    });
-  }
-
-  void _scanListing() {
-    final v = _res.vehicle;
-    final fullText = '${v.brand} ${v.model} ${v.trim} ${v.rawDescription ?? ''}'
-        .toLowerCase();
-
-    int? extractedCV;
-    int? extractedCO2;
-    int? extractedWeight;
-
-    final cvMatch = RegExp(
-      r'(?:fiscal(?:e|es)?|p\.6)\s*[:=-]?\s*(\d+)',
-      caseSensitive: false,
-    ).firstMatch(fullText);
-    if (cvMatch != null) extractedCV = int.tryParse(cvMatch.group(1)!);
-
-    final co2Match = RegExp(r'(\d+)\s*(g/km|g)').firstMatch(fullText);
-    if (co2Match != null) extractedCO2 = int.tryParse(co2Match.group(1)!);
-
-    final weightMatch = RegExp(r'(\d{4})\s*kg').firstMatch(fullText);
-    if (weightMatch != null) {
-      extractedWeight = int.tryParse(weightMatch.group(1)!);
-    }
-
-    if (extractedCV != null) _cvController.text = extractedCV.toString();
-    if (extractedCO2 != null) _co2Controller.text = extractedCO2.toString();
-    if (extractedWeight != null) {
-      _weightController.text = extractedWeight.toString();
-    }
-
-    final updatedVehicle = v.copyWith(
-      powerFiscal: extractedCV ?? v.powerFiscal,
-      co2WLTP: extractedCO2 ?? v.co2WLTP,
-      weightG1: extractedWeight ?? v.weightG1,
-      sourceFiscal: extractedCV != null ? 'Annonce' : v.sourceFiscal,
-      sourceCO2: extractedCO2 != null ? 'Annonce' : v.sourceCO2,
-      sourceWeight: extractedWeight != null ? 'Annonce' : v.sourceWeight,
-    );
-
-    setState(() {
-      _res = TaxCalculator().calculate(
-        updatedVehicle,
-        childrenCount: (_res.familyCO2Deduction > 0) ? 3 : 0,
-        lbcMarketPrice: _res.resaleFRMarket,
-        lbcQuickPrice: _res.resaleFRQuick,
-        comparableCount: _res.comparableCount,
-        proCosts: _res.proCosts,
         vatOnMargin: _res.vatOnMargin,
       );
     });

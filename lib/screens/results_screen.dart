@@ -18,7 +18,7 @@ class ResultsScreen extends StatefulWidget {
   final double proCosts;
   final bool vatOnMargin;
 
-  ResultsScreen({
+  const ResultsScreen({
     super.key,
     required this.listings,
     required this.brand,

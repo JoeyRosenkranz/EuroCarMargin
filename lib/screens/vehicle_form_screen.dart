@@ -11,7 +11,7 @@ import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class VehicleFormScreen extends StatefulWidget {
-  VehicleFormScreen({super.key});
+  const VehicleFormScreen({super.key});
 
   @override
   State<VehicleFormScreen> createState() => _VehicleFormScreenState();

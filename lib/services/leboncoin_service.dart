@@ -112,10 +112,7 @@ class LeBonCoinService {
         'keywords': {'text': keywords},
         'ranges': {
           if (yearFrom != null || yearTo != null)
-            'regdate': {
-              if (yearFrom != null) 'min': yearFrom,
-              if (yearTo != null) 'max': yearTo,
-            },
+            'regdate': {'min': ?yearFrom, 'max': ?yearTo},
         },
         'enums': {
           'ad_type': ['offer'],

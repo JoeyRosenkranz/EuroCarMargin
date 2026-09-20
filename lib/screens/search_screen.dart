@@ -6,7 +6,7 @@ import '../services/autoscout_service.dart';
 import 'results_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  SearchScreen({super.key});
+  const SearchScreen({super.key});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();

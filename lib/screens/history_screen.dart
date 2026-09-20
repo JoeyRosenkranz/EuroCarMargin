@@ -8,7 +8,7 @@ import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
-  HistoryScreen({super.key});
+  const HistoryScreen({super.key});
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
