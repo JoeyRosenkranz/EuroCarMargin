@@ -1,256 +1,518 @@
 import 'dart:math';
-import 'package:flutter/foundation.dart';
-import '../data/tax_data.dart';
-import '../models/vehicle_model.dart';
-import '../models/calculation_result.dart';
 
-/// Moteur de calcul fiscal 2026 — 100% offline
+import '../data/tax_data.dart';
+import '../models/calculation_result.dart';
+import '../models/vehicle_model.dart';
+
+/// Moteur fiscal pour les vehicules d'occasion importes en France en 2026.
+///
+/// Il n'invente jamais une donnee fiscale manquante. Un resultat incomplet est
+/// renvoye avec [CalculationResult.calculationReliable] a false.
 class TaxCalculator {
-  bool _isEV(String? fuel, String model) {
-    if (model.toLowerCase().contains('e-tron') || model.toLowerCase().contains('tesla')) return true;
-    if (fuel == null) return false;
-    final f = fuel.toLowerCase();
-    return f == 'elektro' || f == 'electric' || f == 'électrique' || f.contains('électrique');
+  final DateTime registrationDate;
+
+  TaxCalculator({DateTime? registrationDate})
+    : registrationDate = registrationDate ?? DateTime.now();
+
+  bool _isEVOrHydrogen(String? fuel, String model) {
+    final text = '${fuel ?? ''} $model'.toLowerCase();
+    return text.contains('elektro') ||
+        text.contains('electric') ||
+        text.contains('electrique') ||
+        text.contains('électrique') ||
+        text.contains('hydrogen') ||
+        text.contains('hydrogène') ||
+        text.contains('hydrogene') ||
+        text.contains('tesla');
   }
 
   bool _isPHEV(String? fuel) {
-    if (fuel == null) return false;
-    final f = fuel.toLowerCase();
-    return f.contains('plug-in') || f.contains('phev') || f.contains('rechargeable');
+    final value = (fuel ?? '').toLowerCase();
+    return value.contains('plug-in') ||
+        value.contains('plug in') ||
+        value.contains('phev') ||
+        value.contains('rechargeable');
   }
 
-  double calcTaxeRegionale(String region, int puissanceFiscale, int anneeImmat, {String? fuelType, required String model}) {
-    if (_isEV(fuelType, model)) return 0.0;
-    
-    final prixCV = regionalTaxPerCV[region] ?? 50.0;
-    final age = DateTime.now().year - anneeImmat;
-    
-    // LOGIQUE IMPOSÉE : Si voiture > 10 ans, réduction de 50%
-    return (age > 10) ? (puissanceFiscale * prixCV) / 2 : (puissanceFiscale * prixCV.toDouble());
+  bool _isHybrid(String? fuel) {
+    final value = (fuel ?? '').toLowerCase();
+    return _isPHEV(fuel) ||
+        value.contains('hybrid') ||
+        value.contains('hybride');
   }
 
-  /// Seuil du malus CO2 historique (approx WLTP/NEDC)
-  int _getCO2ThresholdForYear(int annee) {
-    if (annee >= 2026) return 108;
-    if (annee == 2025) return 118;
-    if (annee == 2024) return 118;
-    if (annee == 2023) return 123;
-    if (annee == 2022) return 128;
-    if (annee == 2021) return 133;
-    if (annee == 2020) return 138;
-    if (annee == 2019) return 117; // NEDC
-    if (annee == 2018) return 120;
-    return 131; // Fallback NEDC historique
+  bool _isE85(String? fuel) {
+    final value = (fuel ?? '').toLowerCase();
+    return value.contains('e85') || value.contains('superethanol');
   }
 
-  /// Décalage du Seuil CO2 pour utiliser le barème 2026 comme base relative
-  /// Ajusté pour coller aux montants historiques (approximativement)
-  int _getCO2ShiftForYear(int annee) {
-    if (annee >= 2026) return 0;
-    if (annee == 2025) return -5;
-    if (annee == 2024) return -10;
-    if (annee == 2023) return -12;
-    if (annee == 2022) return -15;
-    if (annee == 2021) return -18;
-    if (annee == 2020) return -25;
-    return -35; // Approx NEDC
+  DateTime _firstRegistration(int year, [int month = 1]) {
+    final safeMonth = month.clamp(1, 12).toInt();
+    // Les annonces fournissent le plus souvent MM/AAAA sans le jour. Retenir
+    // le dernier jour du mois evite de surestimer la decote fiscale.
+    return DateTime(year, safeMonth + 1, 0);
   }
 
-  double calcMalusCO2(int co2, int anneeImmat, {String? fuelType, required String model, int childrenCount = 0}) {
-    if (_isEV(fuelType, model) || _isPHEV(fuelType)) return 0.0;
-    
-    // LOGIQUE IMPOSÉE : Si familleNombreuse (3+ enfants), retrait de 60g (20g * 3)
-    // Note: L'utilisateur a spécifié 'famille ? (co2 - 60) : co2', on applique ce seuil de 3 enfants.
-    int co2Final = (childrenCount >= 3) ? (co2 - 60) : co2;
-    co2Final = max(0, co2Final);
-
-    // Chercher dans le barème de l'ANNEE de la voiture
-    double malusBase = _getHistoricalMalusBase(anneeImmat, co2Final);
-
-    // Appliquer la vétusté de 10% par an (Logique imposée : 1 - (anneesAnciennete * 0.1))
-    final anneesAnciennete = _calcVetustYears(anneeImmat);
-    return malusBase * (1 - (anneesAnciennete * 0.1));
+  int ageInMonths(DateTime firstRegistration) {
+    if (!registrationDate.isAfter(firstRegistration)) return 0;
+    var months =
+        (registrationDate.year - firstRegistration.year) * 12 +
+        registrationDate.month -
+        firstRegistration.month;
+    if (registrationDate.day > firstRegistration.day) months++;
+    return max(1, months);
   }
 
-  /// Recherche exacte du malus historique pour une année et un CO2 donnés
-  double _getHistoricalMalusBase(int annee, int co2) {
-    int threshold = _getCO2ThresholdForYear(annee);
-    if (co2 < threshold) return 0.0;
-
-    if (annee >= 2026) {
-      if (co2 >= 192) return malusPlafond.toDouble();
-      return (co2MalusBareme[co2] ?? 0).toDouble();
+  int ageReductionPercent(DateTime firstRegistration) {
+    final months = ageInMonths(firstRegistration);
+    if (months == 0) return 0;
+    for (final bracket in ageDiscountBrackets) {
+      if (months <= bracket.maxMonths) return bracket.percent;
     }
-
-    // Pour les années historiques, on utilise la courbe calibrée (Expert)
-    // car le barème complet n'est pas en mémoire pour chaque année.
-    final maxM = (historicalMaxMalus[annee] ?? 20000).toDouble();
-    final t = threshold.toDouble();
-    final co2Max = 215.0; // Point de saturation moyen historique
-
-    if (co2 >= co2Max) return maxM;
-    
-    final power = (annee >= 2024) ? 3.0 : 2.2;
-    return pow((co2 - t) / (co2Max - t), power) * maxM;
+    return 100;
   }
 
-  /// Nombre d'années de vétusté (entamées)
-  int _calcVetustYears(int anneeImmat) {
-    final now = DateTime.now();
-    int years = now.year - anneeImmat;
-    // "Année entamée" = si on est dans l'année suivante, ça compte
-    if (years < 0) years = 0;
-    return years;
+  int _scheduleYear(DateTime firstRegistration) {
+    if (firstRegistration.year == 2025 && firstRegistration.month <= 2) {
+      return 2024;
+    }
+    return firstRegistration.year;
   }
 
-  /// Malus CO2 brut (avant vétusté) — pour affichage
-  double calcMalusCO2BeforeVetuste(int co2, int anneeImmat, {String? fuelType, required String model, int childrenCount = 0}) {
-    if (_isEV(fuelType, model) || _isPHEV(fuelType)) return 0.0;
-    
-    int effectiveCO2 = co2 - (childrenCount * 20);
-    if (effectiveCO2 < 0) effectiveCO2 = 0;
+  Co2Schedule? _schedule(DateTime firstRegistration) =>
+      co2Schedules[_scheduleYear(firstRegistration)];
 
-    final threshold = historicalCO2Thresholds[anneeImmat] ?? co2MalusThreshold;
-    if (effectiveCO2 < threshold) return 0;
-
-    final shift = _getCO2ShiftForYear(anneeImmat);
-    final adjustedCO2 = max(0, effectiveCO2 + shift);
-
-    if (adjustedCO2 >= 192) return (historicalMaxMalus[anneeImmat] ?? malusPlafond).toDouble();
-    return (co2MalusBareme[adjustedCO2] ?? 0).toDouble();
+  double _co2Base(
+    int co2,
+    DateTime firstRegistration, {
+    String? fuelType,
+    required String model,
+  }) {
+    if (_isEVOrHydrogen(fuelType, model) || co2 <= 0) return 0;
+    final schedule = _schedule(firstRegistration);
+    if (schedule == null || co2 < schedule.threshold) return 0;
+    if (co2 >= schedule.maximumFrom) return schedule.maximum.toDouble();
+    final override = schedule.overrides[co2];
+    if (override != null) return override.toDouble();
+    final index = co2 - schedule.threshold;
+    if (index < 0) return 0;
+    if (index >= schedule.amounts.length) return schedule.maximum.toDouble();
+    return min(schedule.amounts[index], schedule.maximum).toDouble();
   }
 
-  /// Malus au Poids (TMOM)
-  /// Règle RS3/Famille : -200kg par enfant (si 3+)
-  double calcMalusPoids(int poidsG1, {String? fuelType, required String model, int childrenCount = 0}) {
-    if (_isEV(fuelType, model)) return 0.0;
+  double _discount(double amount, DateTime firstRegistration) {
+    final pct = ageReductionPercent(firstRegistration);
+    return (amount * (100 - pct) / 100).roundToDouble();
+  }
 
-    int poidsCalcul = poidsG1;
-    debugPrint('DEBUG TMOM: poids initial=$poidsG1, enfants=$childrenCount');
+  double calcTaxeRegionale(
+    String region,
+    int puissanceFiscale,
+    int anneeImmat, {
+    int firstRegistrationMonth = 1,
+    String? fuelType,
+    required String model,
+  }) {
+    if (puissanceFiscale <= 0) return 0;
+    final prixCV = regionalTaxPerCV[region] ?? 60.0;
+    final firstRegistration = _firstRegistration(
+      anneeImmat,
+      firstRegistrationMonth,
+    );
+    final tenYearAnniversary = DateTime(
+      firstRegistration.year + 10,
+      firstRegistration.month,
+      firstRegistration.day,
+    );
+    var value = puissanceFiscale * prixCV;
+    if (registrationDate.isAfter(tenYearAnniversary)) value /= 2;
+    if (_isEVOrHydrogen(fuelType, model)) {
+      value *= 1 - (cleanVehicleRegionalExemption[region] ?? 0);
+    }
+    return value.roundToDouble();
+  }
 
-    
-    // Abattement PHEV (200kg max 15%)
+  double calcMalusCO2(
+    int co2,
+    int anneeImmat, {
+    int firstRegistrationMonth = 1,
+    String? fuelType,
+    required String model,
+    int childrenCount = 0,
+    int seats = 5,
+  }) {
+    final firstRegistration = _firstRegistration(
+      anneeImmat,
+      firstRegistrationMonth,
+    );
+    var taxableCo2 = co2;
+    if (_isE85(fuelType) && taxableCo2 <= 250) {
+      taxableCo2 = (taxableCo2 * 0.60).round();
+    }
+    if (childrenCount >= 3 && seats >= 5) {
+      taxableCo2 = max(0, taxableCo2 - childrenCount * 20);
+    }
+    return _discount(
+      _co2Base(taxableCo2, firstRegistration, fuelType: fuelType, model: model),
+      firstRegistration,
+    );
+  }
+
+  double calcMalusCO2BeforeVetuste(
+    int co2,
+    int anneeImmat, {
+    int firstRegistrationMonth = 1,
+    String? fuelType,
+    required String model,
+    int childrenCount = 0,
+    int seats = 5,
+  }) {
+    var taxableCo2 = co2;
+    if (_isE85(fuelType) && taxableCo2 <= 250) {
+      taxableCo2 = (taxableCo2 * 0.60).round();
+    }
+    if (childrenCount >= 3 && seats >= 5) {
+      taxableCo2 = max(0, taxableCo2 - childrenCount * 20);
+    }
+    return _co2Base(
+      taxableCo2,
+      _firstRegistration(anneeImmat, firstRegistrationMonth),
+      fuelType: fuelType,
+      model: model,
+    );
+  }
+
+  List<WeightMalusBracket> _weightBrackets(int year) {
+    if (year >= 2026) return weightBrackets2026;
+    if (year >= 2024) return weightBrackets2024;
+    return weightBrackets2022;
+  }
+
+  int _energyWeight(
+    int weight,
+    DateTime firstRegistration,
+    String? fuelType,
+    int? electricRangeKm,
+  ) {
+    final year = firstRegistration.year;
     if (_isPHEV(fuelType)) {
-      int maxAbattement = (poidsG1 * 0.15).round();
-      int abattementReel = min(200, maxAbattement);
-      poidsCalcul -= abattementReel;
-    }
-    
-    // RÈGLE FAMILLE : -200kg par enfant (3 et +)
-    if (childrenCount >= 3) {
-      final abattementPoids = childrenCount * 200;
-      poidsCalcul -= abattementPoids;
-      debugPrint('TMOM DEBUG: Abattement famille -$abattementPoids kg appliqué. Poids calculé: $poidsCalcul');
-    }
-
-    if (poidsCalcul <= weightMalusThreshold) {
-      debugPrint('TMOM DEBUG: Exonération (poids $poidsCalcul <= seuil $weightMalusThreshold)');
-      return 0.0;
-    }
-
-    double total = 0;
-    for (final bracket in weightMalusBrackets) {
-      if (poidsCalcul < bracket.fromKg) break;
-
-      final upperLimit = bracket.toKg == -1 ? poidsCalcul : min(poidsCalcul, bracket.toKg);
-      final kgsInBracket = upperLimit - bracket.fromKg + 1;
-      if (kgsInBracket > 0) {
-        total += kgsInBracket * bracket.euroPerKg;
+      // Les hybrides rechargeables sont exoneres pour les premieres
+      // immatriculations 2022 a 2024. Depuis 2025, l'abattement est de
+      // 200 kg, plafonne a 15 % de la masse.
+      if (year <= 2024) return 0;
+      if (year >= 2025) {
+        return max(0, weight - min(200, (weight * 0.15).floor()));
       }
     }
-    debugPrint('TMOM DEBUG: Malus poids final = $total €');
-    return total.roundToDouble();
+    if (year >= 2024 && _isHybrid(fuelType)) return max(0, weight - 100);
+    return weight;
   }
 
-  /// Calcul complet de la Carte Grise
+  double _weightBase(
+    int weight,
+    DateTime firstRegistration, {
+    String? fuelType,
+    required String model,
+    int? electricRangeKm,
+    int childrenCount = 0,
+    int seats = 5,
+  }) {
+    if (_isEVOrHydrogen(fuelType, model) || firstRegistration.year < 2022) {
+      return 0;
+    }
+    var taxableWeight = _energyWeight(
+      weight,
+      firstRegistration,
+      fuelType,
+      electricRangeKm,
+    );
+    if (taxableWeight == 0) return 0;
+    if (childrenCount >= 3 && seats >= 5) {
+      taxableWeight = max(0, taxableWeight - childrenCount * 200);
+    }
+    var total = 0.0;
+    for (final bracket in _weightBrackets(firstRegistration.year)) {
+      if (taxableWeight < bracket.fromKg) break;
+      final upper = bracket.toKg == null
+          ? taxableWeight
+          : min(taxableWeight, bracket.toKg!);
+      // Les bornes sont inclusives. Verification croisee avec le simulateur
+      // Service-Public : 1 600 kg en 2025 produit bien 10 EUR avant decote.
+      total += (upper - bracket.fromKg + 1) * bracket.euroPerKg;
+    }
+    return total;
+  }
+
+  double calcMalusPoids(
+    int poidsG1, {
+    int anneeImmat = 2026,
+    int firstRegistrationMonth = 1,
+    String? fuelType,
+    required String model,
+    int? electricRangeKm,
+    int childrenCount = 0,
+    int seats = 5,
+  }) {
+    final firstRegistration = _firstRegistration(
+      anneeImmat,
+      firstRegistrationMonth,
+    );
+    return _discount(
+      _weightBase(
+        poidsG1,
+        firstRegistration,
+        fuelType: fuelType,
+        model: model,
+        electricRangeKm: electricRangeKm,
+        childrenCount: childrenCount,
+        seats: seats,
+      ),
+      firstRegistration,
+    );
+  }
+
+  double _cappedMalus(double co2, double weight, DateTime firstRegistration) {
+    final schedule = _schedule(firstRegistration);
+    if (schedule == null) return co2 + weight;
+    final cap = _discount(schedule.maximum.toDouble(), firstRegistration);
+    return min(co2 + weight, cap);
+  }
+
+  double _effectiveWeightMalus(
+    double co2,
+    double rawWeight,
+    DateTime firstRegistration,
+  ) => max(0, _cappedMalus(co2, rawWeight, firstRegistration) - co2);
+
   double calcCarteGrise({
     required String region,
     required int puissanceFiscale,
     required int anneeImmat,
+    int firstRegistrationMonth = 1,
     required int co2,
     required int poidsG1,
     required String model,
     String? fuelType,
+    int? electricRangeKm,
     int childrenCount = 0,
+    int seats = 5,
   }) {
-    final y1 = calcTaxeRegionale(region, puissanceFiscale, anneeImmat, fuelType: fuelType, model: model);
-    final y3 = calcMalusCO2(co2, anneeImmat, fuelType: fuelType, model: model, childrenCount: childrenCount);
-    final tmom = calcMalusPoids(poidsG1, fuelType: fuelType, model: model, childrenCount: childrenCount);
-    // Plafond cumulé malus CO2 + poids
-    final malusCumule = min(y3 + tmom, malusPlafond.toDouble());
-    return y1 + malusCumule + taxeFixeY4 + redevanceAcheminementY5;
+    final firstRegistration = _firstRegistration(
+      anneeImmat,
+      firstRegistrationMonth,
+    );
+    final y1 = calcTaxeRegionale(
+      region,
+      puissanceFiscale,
+      anneeImmat,
+      firstRegistrationMonth: firstRegistrationMonth,
+      fuelType: fuelType,
+      model: model,
+    );
+    final y3 = calcMalusCO2(
+      co2,
+      anneeImmat,
+      firstRegistrationMonth: firstRegistrationMonth,
+      fuelType: fuelType,
+      model: model,
+      childrenCount: childrenCount,
+      seats: seats,
+    );
+    final mass = calcMalusPoids(
+      poidsG1,
+      anneeImmat: anneeImmat,
+      firstRegistrationMonth: firstRegistrationMonth,
+      fuelType: fuelType,
+      model: model,
+      electricRangeKm: electricRangeKm,
+      childrenCount: childrenCount,
+      seats: seats,
+    );
+    return y1 +
+        _cappedMalus(y3, mass, firstRegistration) +
+        taxeFixeY4 +
+        redevanceAcheminementY5;
   }
 
-  /// Estimation de prix de revente basée sur le prix d'achat
-  /// Simule une comparaison marché (LBC, La Centrale, AutoScout24)
-  /// En production, remplacer par un vrai scraping / API
-  Map<String, double> estimateResalePrices(VehicleEntry vehicle) {
-    // Estimation basée sur le prix d'achat + marge import typique
-    // Un véhicule allemand est généralement 15-25% moins cher qu'en France
-    final base = vehicle.purchasePrice;
-    final age = DateTime.now().year - vehicle.year;
+  Map<String, double> estimateResalePrices(VehicleEntry vehicle) => const {
+    'quick': 0,
+    'market': 0,
+  };
 
-    // Facteur d'augmentation par rapport au prix DE
-    // Plus le véhicule est récent, plus la marge est grande
-    double factor;
-    if (age <= 2) {
-      factor = 1.25; // 25% plus cher en France
-    } else if (age <= 5) {
-      factor = 1.20; // 20% plus cher
-    } else if (age <= 8) {
-      factor = 1.15; // 15% plus cher
-    } else {
-      factor = 1.10; // 10% plus cher
+  CalculationResult calculate(
+    VehicleEntry vehicle, {
+    int childrenCount = 0,
+    double? lbcMarketPrice,
+    double? lbcQuickPrice,
+    int comparableCount = 0,
+    double proCosts = 1500,
+    bool vatOnMargin = true,
+  }) {
+    final warnings = <String>[];
+    var reliable = true;
+    final firstRegistration = _firstRegistration(
+      vehicle.year,
+      vehicle.firstRegistrationMonth,
+    );
+
+    if (vehicle.powerFiscal <= 0) {
+      warnings.add(
+        'Puissance fiscale manquante (champ P.6 de la carte grise).',
+      );
+      reliable = false;
+    }
+    if (vehicle.co2WLTP <= 0 &&
+        !_isEVOrHydrogen(vehicle.fuelType, vehicle.model)) {
+      warnings.add('CO2 WLTP manquant (champ V.7).');
+      reliable = false;
+    }
+    if (vehicle.weightG1 <= 0) {
+      warnings.add('Masse en ordre de marche manquante (champ G, pas G.1).');
+      reliable = false;
+    }
+    if (vehicle.year < 2020) {
+      warnings.add(
+        'Vehicule anterieur a 2020 : le bareme NEDC doit etre verifie avec le simulateur officiel.',
+      );
+      reliable = false;
+    }
+    if (vehicle.transportCost <= 0) {
+      warnings.add('Transport non renseigne.');
+      reliable = false;
+    }
+    if ((lbcMarketPrice ?? 0) <= 0) {
+      warnings.add('Aucun prix francais comparable fiable.');
+      reliable = false;
+    } else if (comparableCount < 3) {
+      warnings.add('Moins de 3 annonces francaises comparables.');
+      reliable = false;
     }
 
-    final marketPrice = base * factor;
-    return {
-      'quick': (marketPrice * 0.90).roundToDouble(), // -10% pour vente rapide
-      'market': marketPrice.roundToDouble(),
-    };
-  }
+    final familyEligible = childrenCount >= 3 && vehicle.seats >= 5;
+    if (childrenCount >= 3 && vehicle.seats < 5) {
+      warnings.add(
+        'Abattement famille refuse : le vehicule doit avoir au moins 5 places.',
+      );
+    }
+    if (familyEligible) {
+      warnings.add(
+        'Famille nombreuse : remboursement ulterieur, un seul vehicule par foyer sur 2 ans.',
+      );
+    }
 
-  /// Calcul complet de la rentabilité (A à Z)
-  CalculationResult calculate(VehicleEntry vehicle, {int childrenCount = 0, double? lbcMarketPrice, double? lbcQuickPrice}) {
     final y1 = calcTaxeRegionale(
-        vehicle.region, vehicle.powerFiscal, vehicle.year, fuelType: vehicle.fuelType, model: vehicle.model);
-    final y3Fixed = calcMalusCO2(vehicle.co2WLTP, vehicle.year, fuelType: vehicle.fuelType, model: vehicle.model, childrenCount: childrenCount);
-    // Malus brut pour info
-    final y3Brut = calcMalusCO2BeforeVetuste(vehicle.co2WLTP, vehicle.year, fuelType: vehicle.fuelType, model: vehicle.model, childrenCount: childrenCount);
-    final tmom = calcMalusPoids(vehicle.weightG1, fuelType: vehicle.fuelType, model: vehicle.model, childrenCount: childrenCount);
+      vehicle.region,
+      vehicle.powerFiscal,
+      vehicle.year,
+      firstRegistrationMonth: vehicle.firstRegistrationMonth,
+      fuelType: vehicle.fuelType,
+      model: vehicle.model,
+    );
+    final cashCo2 = calcMalusCO2(
+      vehicle.co2WLTP,
+      vehicle.year,
+      firstRegistrationMonth: vehicle.firstRegistrationMonth,
+      fuelType: vehicle.fuelType,
+      model: vehicle.model,
+    );
+    final cashWeight = calcMalusPoids(
+      vehicle.weightG1,
+      anneeImmat: vehicle.year,
+      firstRegistrationMonth: vehicle.firstRegistrationMonth,
+      fuelType: vehicle.fuelType,
+      model: vehicle.model,
+      electricRangeKm: vehicle.electricRangeKm,
+    );
+    final cashCombined = _cappedMalus(cashCo2, cashWeight, firstRegistration);
+    final effectiveCashWeight = _effectiveWeightMalus(
+      cashCo2,
+      cashWeight,
+      firstRegistration,
+    );
 
-    // Plafond cumulé
-    final malusCumule = min(y3Fixed + tmom, (historicalMaxMalus[vehicle.year] ?? malusPlafond).toDouble());
+    final finalCo2 = calcMalusCO2(
+      vehicle.co2WLTP,
+      vehicle.year,
+      firstRegistrationMonth: vehicle.firstRegistrationMonth,
+      fuelType: vehicle.fuelType,
+      model: vehicle.model,
+      childrenCount: familyEligible ? childrenCount : 0,
+      seats: vehicle.seats,
+    );
+    final finalWeight = calcMalusPoids(
+      vehicle.weightG1,
+      anneeImmat: vehicle.year,
+      firstRegistrationMonth: vehicle.firstRegistrationMonth,
+      fuelType: vehicle.fuelType,
+      model: vehicle.model,
+      electricRangeKm: vehicle.electricRangeKm,
+      childrenCount: familyEligible ? childrenCount : 0,
+      seats: vehicle.seats,
+    );
+    final finalCombined = _cappedMalus(
+      finalCo2,
+      finalWeight,
+      firstRegistration,
+    );
+    final effectiveFinalWeight = _effectiveWeightMalus(
+      finalCo2,
+      finalWeight,
+      firstRegistration,
+    );
+    final familyRefund = max(0.0, cashCombined - finalCombined);
 
-    // Frais transport minimum 900€
-    final transportCost = max(900.0, vehicle.transportCost);
+    final cashRegistration =
+        y1 + cashCombined + taxeFixeY4 + redevanceAcheminementY5;
+    final finalRegistration =
+        y1 + finalCombined + taxeFixeY4 + redevanceAcheminementY5;
+    final cashRequired =
+        vehicle.purchasePrice +
+        cashRegistration +
+        vehicle.transportCost +
+        vehicle.prepCost;
+    final totalInvested = cashRequired - familyRefund;
 
-    final totalCG = y1 + malusCumule + taxeFixeY4 + redevanceAcheminementY5;
-    final totalInvested = vehicle.purchasePrice + totalCG + transportCost + vehicle.prepCost;
-
-    // Estimations de revente
-    final resale = estimateResalePrices(vehicle);
-    final frMarket = lbcMarketPrice ?? 0.0;
-    final frQuick = lbcQuickPrice ?? (frMarket > 0 ? frMarket * 0.90 : 0.0);
+    final marketPrice = lbcMarketPrice ?? 0;
+    final quickPrice =
+        lbcQuickPrice ?? (marketPrice > 0 ? marketPrice * .95 : 0);
+    final agePct = ageReductionPercent(firstRegistration);
 
     return CalculationResult(
       vehicle: vehicle,
       taxeRegionale: y1,
-      malusCO2: y3Fixed,
-      malusCO2BeforeVetuste: y3Brut,
-      malusPoids: tmom,
+      malusCO2: finalCo2,
+      malusCO2BeforeVetuste: calcMalusCO2BeforeVetuste(
+        vehicle.co2WLTP,
+        vehicle.year,
+        firstRegistrationMonth: vehicle.firstRegistrationMonth,
+        fuelType: vehicle.fuelType,
+        model: vehicle.model,
+        childrenCount: familyEligible ? childrenCount : 0,
+        seats: vehicle.seats,
+      ),
+      malusPoids: effectiveFinalWeight,
+      cashMalusCO2: cashCo2,
+      cashMalusPoids: effectiveCashWeight,
+      familyRefund: familyRefund,
       taxeFixe: taxeFixeY4,
       redevance: redevanceAcheminementY5,
-      totalCarteGrise: totalCG,
+      totalCarteGrise: finalRegistration,
+      cashCarteGrise: cashRegistration,
       totalInvested: totalInvested,
-      resaleEUQuick: resale['quick']!,
-      resaleEUMarket: resale['market']!,
-      resaleFRQuick: frQuick,
-      resaleFRMarket: frMarket,
-      vetustYears: _calcVetustYears(vehicle.year),
-      familyCO2Deduction: (childrenCount >= 3) ? (childrenCount * 20) : 0,
-      familyWeightDeduction: (childrenCount >= 3) ? (childrenCount * 200) : 0,
-      ageReductionPct: min(_calcVetustYears(vehicle.year) * 10, 100),
+      cashRequired: cashRequired,
+      resaleEUQuick: 0,
+      resaleEUMarket: 0,
+      resaleFRQuick: quickPrice,
+      resaleFRMarket: marketPrice,
+      vetustYears: ageInMonths(firstRegistration) ~/ 12,
+      familyCO2Deduction: familyEligible ? childrenCount * 20 : 0,
+      familyWeightDeduction: familyEligible ? childrenCount * 200 : 0,
+      ageReductionPct: agePct,
+      proCosts: max(0.0, proCosts),
+      vatOnMargin: vatOnMargin,
+      calculationReliable: reliable,
+      warnings: warnings,
+      comparableCount: comparableCount,
     );
   }
 }

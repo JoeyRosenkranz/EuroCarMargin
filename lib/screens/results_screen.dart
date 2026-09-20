@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../models/car_listing.dart';
-import '../models/vehicle_model.dart';
-import '../models/calculation_result.dart';
-import '../services/tax_calculator.dart';
 import '../services/autoscout_service.dart';
+import '../services/tax_calculator.dart';
 import '../services/leboncoin_service.dart';
+import '../services/vehicle_specs_resolver.dart';
 import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
@@ -14,12 +13,20 @@ class ResultsScreen extends StatefulWidget {
   final List<CarListing> listings;
   final String brand;
   final String model;
+  final double transportCost;
+  final double prepCost;
+  final double proCosts;
+  final bool vatOnMargin;
 
-  const ResultsScreen({
+  ResultsScreen({
     super.key,
     required this.listings,
     required this.brand,
     required this.model,
+    required this.transportCost,
+    required this.prepCost,
+    required this.proCosts,
+    required this.vatOnMargin,
   });
 
   @override
@@ -27,22 +34,62 @@ class ResultsScreen extends StatefulWidget {
 }
 
 class _ResultsScreenState extends State<ResultsScreen> {
-  final _fmt = NumberFormat.currency(locale: 'fr_FR', symbol: '€', decimalDigits: 0);
+  final _fmt = NumberFormat.currency(
+    locale: 'fr_FR',
+    symbol: '€',
+    decimalDigits: 0,
+  );
   String _selectedRegion = 'Grand Est';
   bool _has3Children = false;
   LeBonCoinPriceResult? _lbcPrices;
   bool _loadingPrices = true;
-
-  /// Best available French market price for calculations
-  double? get _bestFrenchMarketPrice {
-    if (_lbcPrices != null && _lbcPrices!.hasData) return _lbcPrices!.market;
-    return null;
-  }
+  late List<CarListing> _listings;
+  final _loadingTechnical = <String>{};
+  final _autoScoutService = AutoScoutService();
+  final _specsResolver = VehicleSpecsResolver();
 
   @override
   void initState() {
     super.initState();
+    _listings = List<CarListing>.from(widget.listings);
     _fetchLeBonCoinPrices();
+    _prefetchTechnicalData();
+  }
+
+  @override
+  void dispose() {
+    _autoScoutService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _prefetchTechnicalData() async {
+    final limit = _listings.length < 8 ? _listings.length : 8;
+    for (var start = 0; start < limit; start += 3) {
+      final end = start + 3 < limit ? start + 3 : limit;
+      await Future.wait([
+        for (var index = start; index < end; index++)
+          _enrichListing(_listings[index]),
+      ]);
+      if (!mounted) return;
+    }
+  }
+
+  Future<CarListing> _enrichListing(CarListing listing) async {
+    final current = _listings.firstWhere(
+      (item) => item.id == listing.id,
+      orElse: () => listing,
+    );
+    if (current.hasRequiredTechnicalData) return current;
+    if (mounted) setState(() => _loadingTechnical.add(listing.id));
+    final enriched = await _autoScoutService.enrichListing(current);
+    if (!mounted) return enriched;
+    setState(() {
+      final index = _listings.indexWhere((item) => item.id == listing.id);
+      if (index >= 0) _listings[index] = enriched;
+      _listings = _specsResolver.resolveAll(_listings);
+      _loadingTechnical.remove(listing.id);
+    });
+    return enriched;
   }
 
   Future<void> _fetchLeBonCoinPrices() async {
@@ -52,7 +99,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
         brand: widget.brand,
         model: widget.model.isNotEmpty ? widget.model : null,
         yearFrom: widget.listings.isNotEmpty
-            ? widget.listings.map((l) => l.year ?? 2020).reduce((a, b) => a < b ? a : b)
+            ? widget.listings
+                  .map((l) => l.year ?? 2020)
+                  .reduce((a, b) => a < b ? a : b)
             : null,
       );
       if (mounted) {
@@ -66,52 +115,97 @@ class _ResultsScreenState extends State<ResultsScreen> {
     }
   }
 
-  void _openDetail(CarListing listing) {
-    // --- LBC Market Price calculation ---
-    double lbcMarketPrice = 0;
-    double lbcQuickPrice = 0;
-    if (_lbcPrices != null && _lbcPrices!.hasData && widget.listings.isNotEmpty) {
-      double sumDE = 0;
-      for (var l in widget.listings) sumDE += l.price;
-      double avgDE = sumDE / widget.listings.length;
-      if (avgDE > 0) {
-        lbcMarketPrice = listing.price * (_lbcPrices!.market / avgDE);
-        lbcQuickPrice = listing.price * (_lbcPrices!.quick / avgDE);
-      }
+  Future<void> _openDetail(CarListing listing) async {
+    var resolvedListing = listing;
+    if (!listing.hasRequiredTechnicalData) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 16),
+              Expanded(child: Text('Lecture de la fiche technique…')),
+            ],
+          ),
+        ),
+      );
+      resolvedListing = await _enrichListing(listing);
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
     }
+    final comparable =
+        _lbcPrices?.comparableFor(resolvedListing) ??
+        ComparableMarketEstimate.empty();
 
+    final vehicle = resolvedListing
+        .toVehicleEntry(region: _selectedRegion)
+        .copyWith(
+          transportCost: widget.transportCost,
+          prepCost: widget.prepCost,
+        );
     final calculator = TaxCalculator();
     final result = calculator.calculate(
-      listing.toVehicleEntry(region: _selectedRegion),
+      vehicle,
       childrenCount: _has3Children ? 3 : 0,
-      lbcMarketPrice: lbcMarketPrice,
-      lbcQuickPrice: lbcQuickPrice,
+      lbcMarketPrice: comparable.market,
+      lbcQuickPrice: comparable.quick,
+      comparableCount: comparable.count,
+      proCosts: widget.proCosts,
+      vatOnMargin: widget.vatOnMargin,
     );
 
     Navigator.of(context).push(
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) => DashboardScreen(
+        pageBuilder: (_, _, _) => DashboardScreen(
           result: result,
-          imageUrl: listing.imageUrls.isNotEmpty ? listing.imageUrls.first : null,
-          listingUrl: listing.detailUrl.isNotEmpty
-              ? 'https://www.autoscout24.de${listing.detailUrl}'
+          imageUrl: resolvedListing.imageUrls.isNotEmpty
+              ? resolvedListing.imageUrls.first
+              : null,
+          listingUrl: resolvedListing.detailUrl.isNotEmpty
+              ? 'https://www.autoscout24.de${resolvedListing.detailUrl}'
               : null,
         ),
-        transitionsBuilder: (_, anim, __, child) {
+        transitionsBuilder: (_, anim, _, child) {
           return FadeTransition(opacity: anim, child: child);
         },
       ),
     );
   }
 
-  int _estimateCO2(CarListing listing) {
-    // Estimation CO2 basée sur la puissance et le carburant
-    final ps = listing.powerPS ?? 100;
-    final fuel = (listing.fuel ?? '').toLowerCase();
-    if (fuel.contains('elektro')) return 0;
-    if (fuel.contains('hybrid')) return (ps * 0.5).round().clamp(50, 200);
-    if (fuel.contains('diesel')) return (ps * 0.7 + 50).round().clamp(90, 250);
-    return (ps * 0.8 + 40).round().clamp(100, 300); // Benzin default
+  Future<void> _toggleFamilyBenefit() async {
+    if (_has3Children) {
+      setState(() => _has3Children = false);
+      return;
+    }
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Abattement famille nombreuse'),
+        content: Text(
+          'À activer uniquement si le titulaire assume la charge effective '
+          'd’au moins 3 enfants, si le véhicule a au moins 5 places et si le '
+          'foyer n’a pas déjà obtenu ce remboursement depuis 2 ans. Le malus '
+          'complet reste à avancer lors de l’immatriculation.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Je suis éligible'),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true && mounted) setState(() => _has3Children = true);
   }
 
   @override
@@ -120,73 +214,81 @@ class _ResultsScreenState extends State<ResultsScreen> {
       appBar: AppBar(
         title: Text(
           '${widget.brand} ${widget.model}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
         ),
         actions: [
           // Région picker
           PopupMenuButton<String>(
-            icon: const Icon(Icons.location_on, color: AppColors.accent),
+            icon: Icon(Icons.location_on, color: context.appColors.accent),
             tooltip: 'Région',
             onSelected: (r) => setState(() => _selectedRegion = r),
-            itemBuilder: (_) => [
-              'Grand Est',
-              'Île-de-France',
-              'Hauts-de-France',
-              'Auvergne-Rhône-Alpes',
-              'Nouvelle-Aquitaine',
-              'Occitanie',
-              'Provence-Alpes-Côte d\'Azur',
-              'Bretagne',
-              'Normandie',
-              'Pays de la Loire',
-            ]
-                .map((r) => PopupMenuItem(
-                      value: r,
-                      child: Text(r,
+            itemBuilder: (_) =>
+                [
+                      'Grand Est',
+                      'Île-de-France',
+                      'Hauts-de-France',
+                      'Auvergne-Rhône-Alpes',
+                      'Nouvelle-Aquitaine',
+                      'Occitanie',
+                      'Provence-Alpes-Côte d\'Azur',
+                      'Bretagne',
+                      'Normandie',
+                      'Pays de la Loire',
+                    ]
+                    .map(
+                      (r) => PopupMenuItem(
+                        value: r,
+                        child: Text(
+                          r,
                           style: TextStyle(
                             fontWeight: r == _selectedRegion
                                 ? FontWeight.bold
                                 : FontWeight.normal,
-                          )),
-                    ))
-                .toList(),
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(80),
+          preferredSize: Size.fromHeight(96),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Column(
               children: [
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
                   children: [
-                    _chip('${widget.listings.length} annonces DE', AppColors.accent),
-                    const SizedBox(width: 8),
-                    _chip('📍 $_selectedRegion', AppColors.accentPurple),
+                    _chip(
+                      '${widget.listings.length} annonces DE',
+                      context.appColors.accent,
+                    ),
+                    _chip('📍 $_selectedRegion', context.appColors.accentPurple),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
                   children: [
-                    Row(
-                      children: [
-                        if (_loadingPrices)
-                          _chip('🔄 LBC...', AppColors.accentOrange)
-                        else if (_lbcPrices != null && _lbcPrices!.hasData)
-                          _chip(
-                            '🟠 LBC: ${_fmt.format(_lbcPrices!.market)}',
-                            AppColors.accentOrange,
-                          )
-                        else
-                          _chip('LBC: —', AppColors.textMuted),
-                      ],
-                    ),
+                    if (_loadingPrices)
+                      _chip('🔄 Marché FR…', context.appColors.accentOrange)
+                    else if (_lbcPrices != null && _lbcPrices!.hasData)
+                      _chip(
+                        'Marché FR: ${_fmt.format(_lbcPrices!.market)}',
+                        context.appColors.accentOrange,
+                      )
+                    else
+                      _chip('Marché FR: —', context.appColors.textMuted),
                     _actionChip(
                       'Famille (3+)',
                       Icons.family_restroom,
                       _has3Children,
-                      () => setState(() => _has3Children = !_has3Children),
+                      _toggleFamilyBenefit,
                     ),
                   ],
                 ),
@@ -196,56 +298,47 @@ class _ResultsScreenState extends State<ResultsScreen> {
         ),
       ),
       body: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: widget.listings.length,
-        itemBuilder: (context, i) => _buildListingCard(widget.listings[i], i),
+        padding: EdgeInsets.all(12),
+        itemCount: _listings.length,
+        itemBuilder: (context, i) => _buildListingCard(_listings[i], i),
       ),
     );
   }
 
   Widget _buildListingCard(CarListing listing, int index) {
-    // --- LBC Market Price calculation ---
-    double lbcMarketPrice = 0;
-    if (_lbcPrices != null && _lbcPrices!.hasData && widget.listings.isNotEmpty) {
-      double sumDE = 0;
-      for (var l in widget.listings) sumDE += l.price;
-      double avgDE = sumDE / widget.listings.length;
-      if (avgDE > 0) {
-        double ratio = _lbcPrices!.market / avgDE;
-        lbcMarketPrice = listing.price * ratio;
-      }
-    }
-
-    // --- Core Calculation (Recalculé A à Z) ---
-    final calc = TaxCalculator();
-    final res = calc.calculate(
-      listing.toVehicleEntry(region: _selectedRegion),
+    final comparable =
+        _lbcPrices?.comparableFor(listing) ??
+        ComparableMarketEstimate.empty();
+    final vehicle = listing
+        .toVehicleEntry(region: _selectedRegion)
+        .copyWith(
+          transportCost: widget.transportCost,
+          prepCost: widget.prepCost,
+        );
+    final res = TaxCalculator().calculate(
+      vehicle,
       childrenCount: _has3Children ? 3 : 0,
-      lbcMarketPrice: lbcMarketPrice,
+      lbcMarketPrice: comparable.market,
+      lbcQuickPrice: comparable.quick,
+      comparableCount: comparable.count,
+      proCosts: widget.proCosts,
+      vatOnMargin: widget.vatOnMargin,
     );
 
-    final profitEU = res.profitEUMarket;
-    final marginEU = res.marginEUMarket;
-    final riskColorEU = _getRiskColor(marginEU);
-
-    final profitLBC = res.profitFRMarket;
-    final marginLBC = res.marginFRMarket;
-    final riskColorLBC = _getRiskColor(marginLBC);
-
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: 12),
       child: GestureDetector(
         onTap: () => _openDetail(listing),
         child: Container(
           decoration: BoxDecoration(
-            color: AppColors.surface,
+            color: context.appColors.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.cardBorder),
+            border: Border.all(color: context.appColors.cardBorder),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.15),
+                color: Colors.black.withValues(alpha: 0.15),
                 blurRadius: 8,
-                offset: const Offset(0, 2),
+                offset: Offset(0, 2),
               ),
             ],
           ),
@@ -254,8 +347,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
             children: [
               // --- Image ---
               ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(16)),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
                 child: listing.imageUrls.isNotEmpty
                     ? SizedBox(
                         height: 250,
@@ -263,17 +357,21 @@ class _ResultsScreenState extends State<ResultsScreen> {
                           itemCount: listing.imageUrls.length,
                           itemBuilder: (context, index) {
                             return Container(
-                              color: AppColors.surfaceLight,
+                              color: context.appColors.surfaceLight,
                               child: Image.network(
                                 listing.imageUrls[index],
-                                fit: BoxFit.contain,
-                                errorBuilder: (_, __, ___) => _imagePlaceholder(),
+                                fit: BoxFit.cover,
+                                filterQuality: FilterQuality.high,
+                                gaplessPlayback: true,
+                                headers: {'Accept': 'image/webp,image/*'},
+                                errorBuilder: (_, _, _) => _imagePlaceholder(),
                                 loadingBuilder: (_, child, loading) {
                                   if (loading == null) return child;
-                                  return const Center(
+                                  return Center(
                                     child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppColors.accent),
+                                      strokeWidth: 2,
+                                      color: context.appColors.accent,
+                                    ),
                                   );
                                 },
                               ),
@@ -286,7 +384,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
               // --- Content ---
               Padding(
-                padding: const EdgeInsets.all(14),
+                padding: EdgeInsets.all(14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -300,24 +398,24 @@ class _ResultsScreenState extends State<ResultsScreen> {
                             style: GoogleFonts.outfit(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
+                              color: context.appColors.textPrimary,
                             ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: 8),
                         Text(
                           listing.priceFormatted,
                           style: GoogleFonts.outfit(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.accent,
+                            color: context.appColors.accent,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
+                    SizedBox(height: 10),
 
                     // Specs row
                     Wrap(
@@ -327,8 +425,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
                         if (listing.year != null)
                           _specChip(Icons.calendar_today, '${listing.year}'),
                         if (listing.mileage != null)
-                          _specChip(Icons.speed,
-                              '${(listing.mileage! / 1000).toStringAsFixed(0)}k km'),
+                          _specChip(
+                            Icons.speed,
+                            '${(listing.mileage! / 1000).toStringAsFixed(0)}k km',
+                          ),
                         if (listing.powerPS != null)
                           _specChip(Icons.bolt, '${listing.powerPS} PS'),
                         if (listing.fuel != null)
@@ -336,20 +436,68 @@ class _ResultsScreenState extends State<ResultsScreen> {
                         if (listing.transmission != null)
                           _specChip(Icons.settings, listing.transmission!),
                         if (_has3Children)
-                          _specChip(Icons.family_restroom, '-60g CO2', color: AppColors.accentGreen),
-                        if (DateTime.now().year - (listing.year ?? DateTime.now().year) > 0)
-                          _specChip(Icons.trending_down, '-${(DateTime.now().year - (listing.year ?? DateTime.now().year)) * 10}% Vétusté', color: AppColors.accentCyan),
+                          _specChip(
+                            Icons.family_restroom,
+                            'Remboursement simulé',
+                            color: context.appColors.accentGreen,
+                          ),
+                        if (_loadingTechnical.contains(listing.id))
+                          _specChip(
+                            Icons.sync_rounded,
+                            'Données techniques…',
+                            color: context.appColors.accentCyan,
+                          )
+                        else if (listing.hasRequiredTechnicalData)
+                          _specChip(
+                            Icons.verified_rounded,
+                            'Fiche technique chargée',
+                            color: context.appColors.accentGreen,
+                          ),
+                        if (res.ageReductionPct > 0)
+                          _specChip(
+                            Icons.trending_down,
+                            'Décote légale −${res.ageReductionPct.toStringAsFixed(0)} %',
+                            color: context.appColors.accentCyan,
+                          ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-
-                    // Profitability preview
+                    SizedBox(height: 12),
+                    if (!res.calculationReliable) ...[
+                      _warningBanner(res.warnings.first),
+                      SizedBox(height: 10),
+                    ],
                     Row(
                       children: [
-                        Expanded(child: _buildMarginBlock('AutoScout (EU)', marginEU, profitEU, riskColorEU, true)),
-                        const SizedBox(width: 8),
-                        Expanded(child: _buildMarginBlock('LeBonCoin (FR)', marginLBC, profitLBC, riskColorLBC, marginLBC > 0)),
+                        Expanded(
+                          child: _buildMarginBlock(
+                            'Marché FR',
+                            res.marginFRMarket,
+                            res.profitFRMarket,
+                            _getRiskColor(res.marginFRMarket),
+                            comparable.count >= 3 && res.calculationReliable,
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: _buildMarginBlock(
+                            'Vente rapide',
+                            res.marginFRQuick,
+                            res.profitFRQuick,
+                            _getRiskColor(res.marginFRQuick),
+                            comparable.count >= 3 && res.calculationReliable,
+                          ),
+                        ),
                       ],
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      comparable.count >= 3
+                          ? '${comparable.count} annonces françaises comparables · année ±1 · kilométrage proche'
+                          : 'Prix de revente masqué : moins de 3 annonces réellement comparables.',
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
                 ),
@@ -361,27 +509,79 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
-  Widget _buildMarginBlock(String source, double margin, double profit, Color riskColor, bool hasData) {
+  Widget _warningBanner(String message) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: context.appColors.accentOrange.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: context.appColors.accentOrange.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 17,
+            color: context.appColors.accentOrange,
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 11,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMarginBlock(
+    String source,
+    double margin,
+    double profit,
+    Color riskColor,
+    bool hasData,
+  ) {
     if (!hasData) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(
-          color: AppColors.surfaceLight.withValues(alpha: 0.5),
+          color: context.appColors.surfaceLight.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.cardBorder),
+          border: Border.all(color: context.appColors.cardBorder),
         ),
         child: Column(
           children: [
-            Text('Revente $source', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-            const SizedBox(height: 2),
-            const Text('N/A', style: TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.bold, fontSize: 14)),
+            Text(
+              'Revente $source',
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+            ),
+            SizedBox(height: 2),
+            Text(
+              'N/A',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
           ],
         ),
       );
     }
-    
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: riskColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
@@ -396,78 +596,86 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 margin >= 15
                     ? Icons.trending_up_rounded
                     : margin >= 5
-                        ? Icons.trending_flat_rounded
-                        : Icons.trending_down_rounded,
+                    ? Icons.trending_flat_rounded
+                    : Icons.trending_down_rounded,
                 color: riskColor,
                 size: 14,
               ),
-              const SizedBox(width: 4),
+              SizedBox(width: 4),
               Text(
                 'Marge $source',
-                style: TextStyle(color: riskColor, fontWeight: FontWeight.w600, fontSize: 11),
+                style: TextStyle(
+                  color: riskColor,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
-          const SizedBox(height: 2),
+          SizedBox(height: 2),
           Text(
             '${profit >= 0 ? '+' : ''}${_fmt.format(profit)}',
-            style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w700, color: riskColor),
+            style: GoogleFonts.outfit(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: riskColor,
+            ),
           ),
           Text(
             '${margin.toStringAsFixed(1)}%',
-            style: TextStyle(color: riskColor.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.bold),
-          )
+            style: TextStyle(
+              color: riskColor.withValues(alpha: 0.8),
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
   }
+
   Color _getRiskColor(double margin) {
-    if (margin < 0) return AppColors.accentRed;
-    if (margin >= 25) return AppColors.accentGreen;
-    if (margin >= 0) return AppColors.accentOrange;
-    return AppColors.textMuted;
-  }
-  double _estimateCarteGrise(CarListing listing) {
-    final calc = TaxCalculator();
-    final co2 = listing.co2 ?? _estimateCO2(listing);
-    final year = listing.year ?? DateTime.now().year;
-    final y1 = calc.calcTaxeRegionale(
-        _selectedRegion, listing.estimatedFiscalPower, year, fuelType: listing.fuel, model: listing.model);
-    final y3 = calc.calcMalusCO2(co2, year, fuelType: listing.fuel, model: listing.model, childrenCount: _has3Children ? 3 : 0);
-    final tmom = calc.calcMalusPoids(listing.estimatedWeightG1, fuelType: listing.fuel, model: listing.model);
-    final malusCumule = (y3 + tmom) > 80000 ? 80000 : (y3 + tmom);
-    return y1 + malusCumule + 11.0 + 2.76;
+    if (margin < 0) return context.appColors.accentRed;
+    if (margin >= 15) return context.appColors.accentGreen;
+    if (margin >= 7) return context.appColors.accentOrange;
+    return context.appColors.textMuted;
   }
 
   Widget _imagePlaceholder() {
     return Container(
       height: 180,
-      color: AppColors.surfaceLight,
-      child: const Center(
-        child: Icon(Icons.directions_car_rounded,
-            size: 48, color: AppColors.textMuted),
+      color: context.appColors.surfaceLight,
+      child: Center(
+        child: Icon(
+          Icons.directions_car_rounded,
+          size: 48,
+          color: context.appColors.textMuted,
+        ),
       ),
     );
   }
 
   Widget _specChip(IconData icon, String text, {Color? color}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: (color ?? AppColors.textSecondary).withValues(alpha: 0.1),
+        color: (color ?? context.appColors.textSecondary).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: color ?? AppColors.textSecondary),
-          const SizedBox(width: 4),
-          Text(text,
-              style: TextStyle(
-                  color: color ?? AppColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: color != null ? FontWeight.w600 : FontWeight.normal)),
+          Icon(icon, size: 13, color: color ?? context.appColors.textSecondary),
+          SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              color: color ?? context.appColors.textSecondary,
+              fontSize: 12,
+              fontWeight: color != null ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
         ],
       ),
     );
@@ -475,32 +683,57 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   Widget _chip(String text, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(text,
-          style: TextStyle(
-              color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
-  Widget _actionChip(String text, IconData icon, bool isActive, VoidCallback onTap) {
+  Widget _actionChip(
+    String text,
+    IconData icon,
+    bool isActive,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: isActive ? AppColors.accent.withValues(alpha: 0.15) : AppColors.surfaceLight,
+          color: isActive
+              ? context.appColors.accent.withValues(alpha: 0.15)
+              : context.appColors.surfaceLight,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isActive ? AppColors.accent : AppColors.cardBorder),
+          border: Border.all(
+            color: isActive ? context.appColors.accent : context.appColors.cardBorder,
+          ),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 14, color: isActive ? AppColors.accent : AppColors.textSecondary),
-            const SizedBox(width: 4),
-            Text(text, style: TextStyle(color: isActive ? AppColors.accent : AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+            Icon(
+              icon,
+              size: 14,
+              color: isActive ? context.appColors.accent : context.appColors.textSecondary,
+            ),
+            SizedBox(width: 4),
+            Text(
+              text,
+              style: TextStyle(
+                color: isActive ? context.appColors.accent : context.appColors.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),

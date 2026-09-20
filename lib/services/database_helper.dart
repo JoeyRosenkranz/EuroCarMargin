@@ -19,8 +19,8 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, fileName);
     return await openDatabase(
-      path, 
-      version: 3, 
+      path,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -34,6 +34,35 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE searches ADD COLUMN resale_fr_quick REAL');
       await db.execute('ALTER TABLE searches ADD COLUMN resale_fr_market REAL');
     }
+    if (oldVersion < 4) {
+      const columns = <String, String>{
+        'first_registration_month': 'INTEGER DEFAULT 1',
+        'mileage': 'INTEGER',
+        'seats': 'INTEGER DEFAULT 5',
+        'electric_range_km': 'INTEGER',
+        'source_fiscal': "TEXT DEFAULT 'Manquant'",
+        'source_co2': "TEXT DEFAULT 'Manquant'",
+        'source_weight': "TEXT DEFAULT 'Manquant'",
+        'raw_description': 'TEXT',
+        'cash_malus_co2': 'REAL DEFAULT 0',
+        'cash_malus_poids': 'REAL DEFAULT 0',
+        'family_refund': 'REAL DEFAULT 0',
+        'cash_carte_grise': 'REAL DEFAULT 0',
+        'cash_required': 'REAL DEFAULT 0',
+        'pro_costs': 'REAL DEFAULT 1500',
+        'vat_on_margin': 'INTEGER DEFAULT 1',
+        'family_co2_deduction': 'INTEGER DEFAULT 0',
+        'family_weight_deduction': 'INTEGER DEFAULT 0',
+        'age_reduction_pct': 'INTEGER DEFAULT 0',
+        'calculation_reliable': 'INTEGER DEFAULT 0',
+        'comparable_count': 'INTEGER DEFAULT 0',
+      };
+      for (final entry in columns.entries) {
+        await db.execute(
+          'ALTER TABLE searches ADD COLUMN ${entry.key} ${entry.value}',
+        );
+      }
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -44,29 +73,49 @@ class DatabaseHelper {
         model TEXT NOT NULL,
         trim TEXT,
         year INTEGER NOT NULL,
+        first_registration_month INTEGER DEFAULT 1,
+        mileage INTEGER,
         power_din INTEGER NOT NULL,
         power_fiscal INTEGER NOT NULL,
         weight_g1 INTEGER NOT NULL,
         co2_wltp INTEGER NOT NULL,
         fuel_type TEXT,
+        seats INTEGER DEFAULT 5,
+        electric_range_km INTEGER,
         purchase_price REAL NOT NULL,
         transport_cost REAL DEFAULT 0,
         prep_cost REAL DEFAULT 0,
         region TEXT NOT NULL,
+        source_fiscal TEXT,
+        source_co2 TEXT,
+        source_weight TEXT,
+        raw_description TEXT,
         taxe_regionale REAL,
         malus_co2 REAL,
         malus_co2_before_vetuste REAL,
         malus_poids REAL,
+        cash_malus_co2 REAL,
+        cash_malus_poids REAL,
+        family_refund REAL,
         total_carte_grise REAL,
+        cash_carte_grise REAL,
         total_invested REAL,
+        cash_required REAL,
         resale_quick REAL,
         resale_market REAL,
         resale_fr_quick REAL,
         resale_fr_market REAL,
         profit_quick REAL,
         profit_market REAL,
+        pro_costs REAL,
+        vat_on_margin INTEGER,
         risk_level TEXT,
         vetust_years INTEGER,
+        family_co2_deduction INTEGER,
+        family_weight_deduction INTEGER,
+        age_reduction_pct INTEGER,
+        calculation_reliable INTEGER,
+        comparable_count INTEGER,
         created_at TEXT NOT NULL
       )
     ''');

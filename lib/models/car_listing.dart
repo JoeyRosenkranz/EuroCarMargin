@@ -10,6 +10,7 @@ class CarListing {
   final String priceFormatted;
   final int? mileage; // km
   final int? year; // Année 1ère immat
+  final int? firstRegistrationMonth;
   final String? fuel; // Benzin, Diesel, Elektro...
   final int? powerKW;
   final int? powerPS;
@@ -19,8 +20,11 @@ class CarListing {
   final String detailUrl; // URL relative AutoScout24
   final String? location;
   final String? sellerType; // Händler / Privat
-  final int? weightG1; // Poids à vide G1 (kg)
+  final int? weightG1; // Masse en ordre de marche, rubrique G (kg)
+  final int? seats;
+  final int? electricRangeKm;
   final String? description; // Description textuelle de l'annonce
+  final String technicalSource;
 
   const CarListing({
     required this.id,
@@ -31,6 +35,7 @@ class CarListing {
     required this.priceFormatted,
     this.mileage,
     this.year,
+    this.firstRegistrationMonth,
     this.fuel,
     this.powerKW,
     this.powerPS,
@@ -41,30 +46,74 @@ class CarListing {
     this.location,
     this.sellerType,
     this.weightG1,
+    this.seats,
+    this.electricRangeKm,
     this.description,
+    this.technicalSource = 'Annonce AutoScout24',
   });
 
-  /// Puissance fiscale estimée (CV) — approximation officielle française
-  /// Formule: 1 + (CO2/45) + (kW/40)^1.6
-  int get estimatedFiscalPower {
-    final co2Val = co2 ?? 0;
-    final kwVal = powerKW ?? 0;
-    if (co2Val == 0 && kwVal == 0) return 5; // Fallback
-    final pa = (kwVal / 40);
-    final cv = 1.0 + (co2Val / 45.0) + (pa * pa > 1 ? pa * pa : pa);
-    return cv.round().clamp(1, 100);
+  bool get hasRequiredTechnicalData {
+    final isElectric = (fuel ?? '').toLowerCase().contains('elektro');
+    return estimatedFiscalPower > 0 &&
+        weightG1 != null &&
+        weightG1! > 0 &&
+        (isElectric || (co2 != null && co2! > 0));
   }
 
-  /// Poids estimé G1 basé sur le segment (approximation)
-  /// En l'absence de donnée exacte, on estime via la puissance
-  int get estimatedWeightG1 {
-    final ps = powerPS ?? 100;
-    if (ps <= 110) return 1350;
-    if (ps <= 150) return 1450;
-    if (ps <= 200) return 1550;
-    if (ps <= 250) return 1650;
-    if (ps <= 350) return 1800;
-    return 2000;
+  CarListing copyWith({
+    String? title,
+    int? mileage,
+    int? year,
+    int? firstRegistrationMonth,
+    String? fuel,
+    int? powerKW,
+    int? powerPS,
+    int? co2,
+    String? transmission,
+    List<String>? imageUrls,
+    String? location,
+    String? sellerType,
+    int? weightG1,
+    int? seats,
+    int? electricRangeKm,
+    String? description,
+    String? technicalSource,
+  }) {
+    return CarListing(
+      id: id,
+      title: title ?? this.title,
+      brand: brand,
+      model: model,
+      price: price,
+      priceFormatted: priceFormatted,
+      mileage: mileage ?? this.mileage,
+      year: year ?? this.year,
+      firstRegistrationMonth:
+          firstRegistrationMonth ?? this.firstRegistrationMonth,
+      fuel: fuel ?? this.fuel,
+      powerKW: powerKW ?? this.powerKW,
+      powerPS: powerPS ?? this.powerPS,
+      co2: co2 ?? this.co2,
+      transmission: transmission ?? this.transmission,
+      imageUrls: imageUrls ?? this.imageUrls,
+      detailUrl: detailUrl,
+      location: location ?? this.location,
+      sellerType: sellerType ?? this.sellerType,
+      weightG1: weightG1 ?? this.weightG1,
+      seats: seats ?? this.seats,
+      electricRangeKm: electricRangeKm ?? this.electricRangeKm,
+      description: description ?? this.description,
+      technicalSource: technicalSource ?? this.technicalSource,
+    );
+  }
+
+  /// Puissance administrative des VP thermiques homologues depuis 2020.
+  /// PA = 1,34 + 1,8 × (P/100)² + 3,87 × (P/100), P en kW.
+  int get estimatedFiscalPower {
+    final kw = powerKW;
+    if (kw == null || kw <= 0 || (year ?? 0) < 2020) return 0;
+    final p = kw / 100;
+    return (1.34 + 1.8 * p * p + 3.87 * p).round().clamp(1, 100);
   }
 
   factory CarListing.fromAutoScoutJson(Map<String, dynamic> json) {
@@ -81,33 +130,22 @@ class CarListing {
     // Parse images
     final imagesRaw = json['images'] as List<dynamic>? ?? [];
     final imageUrls = imagesRaw
-        .map((img) {
-          String url = '';
-          if (img is Map<String, dynamic>) {
-            url = img['url'] as String? ?? '';
-          } else if (img is String) {
-            url = img;
-          }
-          
-          if (url.isNotEmpty) {
-             final qmIndex = url.indexOf('?');
-             if (qmIndex != -1) {
-               return url.substring(0, qmIndex);
-             }
-          }
-          return url;
-        })
+        .map(_extractBestImageUrl)
         .where((url) => url.isNotEmpty)
+        .toSet()
         .toList();
 
     // Parse vehicle details (mileage, year, power, fuel)
     final details = json['vehicleDetails'] as List<dynamic>? ?? [];
     int? mileage;
     int? year;
+    int? firstRegistrationMonth;
     int? powerKW;
     int? powerPS;
     int? co2;
     int? weightG1;
+    int? seats;
+    int? electricRangeKm;
     String? fuel;
     String? transmission;
 
@@ -120,7 +158,9 @@ class CarListing {
         mileage = _parseNumber(data);
       } else if (label.contains('erstzulassung') ||
           label.contains('registration')) {
-        year = _parseYear(data);
+        final registration = _parseRegistration(data);
+        year = registration.$1;
+        firstRegistrationMonth = registration.$2;
       } else if (label.contains('leistung') || label.contains('power')) {
         final match = RegExp(r'(\d+)\s*kW').firstMatch(data);
         if (match != null) powerKW = int.tryParse(match.group(1)!);
@@ -128,18 +168,24 @@ class CarListing {
         if (psMatch != null) powerPS = int.tryParse(psMatch.group(1)!);
       } else if (label.contains('kraftstoff') || label.contains('fuel')) {
         fuel = data;
-      } else if (label.contains('getriebe') ||
-          label.contains('transmission')) {
+      } else if (label.contains('getriebe') || label.contains('transmission')) {
         transmission = data;
       } else if (label.contains('co2') || label.contains('emissionen')) {
         co2 = _parseNumber(data);
-      } else if (label.contains('gewicht') || label.contains('weight') || label.contains('leergewicht')) {
+      } else if (label.contains('gewicht') ||
+          label.contains('weight') ||
+          label.contains('leergewicht')) {
         // Can be "1.585 kg"
         final w = _parseNumber(data);
         if (w != null && w > 500) weightG1 = w;
+      } else if (label.contains('sitzpl') || label.contains('seats')) {
+        seats = _parseNumber(data);
+      } else if (label.contains('reichweite') ||
+          label.contains('electric range')) {
+        electricRangeKm = _parseNumber(data);
       }
     }
-    
+
     // Fallback from raw JSON keys if not in vehicleDetails list
     co2 ??= _parseNumber(vehicle['co2Content']?.toString());
     weightG1 ??= _parseNumber(vehicle['weight']?.toString());
@@ -147,6 +193,9 @@ class CarListing {
     // Also try top-level fields
     mileage ??= _parseNumber(vehicle['mileage']?.toString());
     year ??= vehicle['firstRegistrationYear'] as int?;
+    firstRegistrationMonth ??= int.tryParse(
+      vehicle['firstRegistrationMonth']?.toString() ?? '',
+    );
     fuel ??= vehicle['fuelType'] as String?;
 
     final url = json['url'] as String? ?? '';
@@ -157,26 +206,33 @@ class CarListing {
         : null;
     final seller = json['seller'] as Map<String, dynamic>?;
     final sellerType = seller?['type'] as String?;
+    final description =
+        json['description']?.toString() ?? vehicle['description']?.toString();
 
     return CarListing(
       id: id,
-      title: '$make $model${json['version'] != null ? ' ${json['version']}' : ''}',
+      title:
+          '$make $model${json['version'] != null ? ' ${json['version']}' : ''}',
       brand: make,
       model: model,
       price: priceValue,
       priceFormatted: priceFormatted,
       mileage: mileage,
       year: year,
+      firstRegistrationMonth: firstRegistrationMonth,
       fuel: fuel,
       powerKW: powerKW,
       powerPS: powerPS,
       co2: co2,
       weightG1: weightG1,
+      seats: seats,
+      electricRangeKm: electricRangeKm,
       imageUrls: imageUrls.cast<String>(),
       detailUrl: url,
       location: locationStr,
       sellerType: sellerType,
       transmission: transmission,
+      description: description,
     );
   }
 
@@ -192,10 +248,56 @@ class CarListing {
     return int.tryParse(cleaned);
   }
 
-  static int? _parseYear(String s) {
-    // "10/2023" or "2023"
-    final match = RegExp(r'(\d{4})').firstMatch(s);
-    return match != null ? int.tryParse(match.group(1)!) : null;
+  static (int?, int?) _parseRegistration(String value) {
+    final match = RegExp(r'(?:(\d{1,2})[./-])?(\d{4})').firstMatch(value);
+    if (match == null) return (null, null);
+    final month = int.tryParse(match.group(1) ?? '');
+    final year = int.tryParse(match.group(2) ?? '');
+    return (year, month != null && month >= 1 && month <= 12 ? month : null);
+  }
+
+  static String _extractBestImageUrl(dynamic image) {
+    String url = '';
+    if (image is String) {
+      url = image;
+    } else if (image is Map<String, dynamic>) {
+      for (final key in const [
+        'urlFull',
+        'fullUrl',
+        'urlLarge',
+        'large',
+        'url',
+        'src',
+      ]) {
+        final candidate = image[key];
+        if (candidate is String && candidate.isNotEmpty) {
+          url = candidate;
+          break;
+        }
+      }
+    }
+    if (url.isEmpty) return '';
+    if (url.startsWith('//')) url = 'https:$url';
+    url = url.replaceAllMapped(
+      RegExp(r'/(\d{2,4})x(\d{2,4})(?=[./][^/]*$)'),
+      (_) => '/1600x1200',
+    );
+
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    final query = Map<String, String>.from(uri.queryParameters);
+    // AutoScout sert parfois une vignette 320 px. On conserve le CDN et on
+    // demande une version suffisamment grande pour les ecrans Retina.
+    for (final key in const ['w', 'width']) {
+      if (query.containsKey(key)) query[key] = '1600';
+    }
+    for (final key in const ['h', 'height']) {
+      if (query.containsKey(key)) query[key] = '1200';
+    }
+    if (query.containsKey('quality')) query['quality'] = '90';
+    return uri
+        .replace(queryParameters: query.isEmpty ? null : query)
+        .toString();
   }
 
   /// Convertit une annonce en objet de calcul fiscal avec priorité aux données réelles
@@ -206,41 +308,66 @@ class CarListing {
     int? extractedWeight;
 
     // On scanne tout ce qu'on a
-    final fullText = '$title ${description ?? ''} ${fuel ?? ''} ${transmission ?? ''}'.toLowerCase();
+    final fullText =
+        '$title ${description ?? ''} ${fuel ?? ''} ${transmission ?? ''}'
+            .toLowerCase();
 
-    // Regex pour CV fiscaux (ex: "24 CV", "24CV", "fiscal 24")
-    final cvMatch = RegExp(r'(\d+)\s*cv').firstMatch(fullText);
+    // Ne retenir un CV que s'il est explicitement qualifie de fiscal. Dans
+    // certaines annonces, "CV" designe la puissance moteur et fausserait P.6.
+    final cvMatch = RegExp(
+      r'(?:fiscal(?:e|es)?|p\.6)\s*[:=-]?\s*(\d+)',
+      caseSensitive: false,
+    ).firstMatch(fullText);
     if (cvMatch != null) {
       extractedCV = int.tryParse(cvMatch.group(1)!);
     }
 
     // Regex pour CO2 (ex: "185g", "185 g/km")
-    final co2Match = RegExp(r'(\d+)\s*(g/km|g)').firstMatch(fullText);
+    final co2Match = RegExp(
+      r'(?:co2|co₂|v\.7)[^0-9]{0,40}(\d{1,3})\s*g(?:/km)?',
+    ).firstMatch(fullText);
     if (co2Match != null) {
       extractedCO2 = int.tryParse(co2Match.group(1)!);
     }
 
     // Regex pour Poids (ex: "1585kg", "1585 kg")
-    final weightMatch = RegExp(r'(\d{4})\s*kg').firstMatch(fullText);
+    final weightMatch = RegExp(
+      r'(?:leergewicht|poids|masse|champ g)[^0-9]{0,60}(\d{3,4})\s*kg',
+    ).firstMatch(fullText);
     if (weightMatch != null) {
       extractedWeight = int.tryParse(weightMatch.group(1)!);
     }
 
     // Sources
-    final sCV = extractedCV != null ? 'Annonce' : 'Manquant';
-    final sCO2 = (extractedCO2 ?? co2) != null ? 'Annonce' : 'Manquant';
-    final sW = (extractedWeight ?? weightG1) != null ? 'Annonce' : 'Manquant';
+    final calculatedCV = extractedCV ?? estimatedFiscalPower;
+    final sCV = extractedCV != null
+        ? 'Annonce'
+        : calculatedCV > 0
+        ? 'Calcul officiel kW'
+        : 'Manquant';
+    final sCO2 = (extractedCO2 ?? co2) != null
+        ? technicalSource
+        : 'Manquant';
+    final sW = (extractedWeight ?? weightG1) != null
+        ? technicalSource
+        : 'Manquant';
 
     return VehicleEntry(
       brand: brand,
       model: model,
       year: year ?? DateTime.now().year,
+      // Mois inconnu : decembre est le choix fiscal conservateur pour ne pas
+      // surestimer la decote liee a l'age.
+      firstRegistrationMonth: firstRegistrationMonth ?? 12,
+      mileage: mileage,
       powerDIN: powerPS ?? (powerKW != null ? (powerKW! * 1.36).round() : 100),
       // ON NE MET PLUS DE VALEUR AU HASARD (0 si non trouvé pour le rouge UI)
-      powerFiscal: extractedCV ?? 0, 
+      powerFiscal: calculatedCV,
       weightG1: extractedWeight ?? (weightG1 ?? 0),
       co2WLTP: extractedCO2 ?? (co2 ?? 0),
       fuelType: fuel,
+      seats: seats ?? 5,
+      electricRangeKm: electricRangeKm,
       purchasePrice: price,
       region: region,
       sourceFiscal: sCV,

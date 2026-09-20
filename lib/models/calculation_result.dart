@@ -1,57 +1,62 @@
 import 'vehicle_model.dart';
 
-/// Niveaux de risque
 enum RiskLevel {
-  green, // marge >= 20 %
-  orange, // marge 10-20 %
-  red; // marge < 10 %
+  green,
+  orange,
+  red;
 
-  String get label {
-    switch (this) {
-      case RiskLevel.green:
-        return 'Rentable';
-      case RiskLevel.orange:
-        return 'Modéré';
-      case RiskLevel.red:
-        return 'Risqué';
-    }
-  }
+  String get label => switch (this) {
+    RiskLevel.green => 'Rentable',
+    RiskLevel.orange => 'A verifier',
+    RiskLevel.red => 'Risque eleve',
+  };
 }
 
-/// Résultat complet du calcul de rentabilité
+/// Resultat financier. Les couts de tresorerie et le cout economique final sont
+/// volontairement separes : l'avantage famille nombreuse est rembourse apres
+/// l'immatriculation, il ne diminue donc pas la somme a avancer.
 class CalculationResult {
   final VehicleEntry vehicle;
 
-  // Carte grise decomposition
-  final double taxeRegionale; // Y1
-  final double malusCO2; // Y3 (après vétusté)
-  final double malusCO2BeforeVetuste; // Y3 avant vétusté
-  final double malusPoids; // TMOM
-  final double taxeFixe; // Y4
-  final double redevance; // Y5
+  final double taxeRegionale;
+  final double malusCO2;
+  final double malusCO2BeforeVetuste;
+  final double malusPoids;
+  final double cashMalusCO2;
+  final double cashMalusPoids;
+  final double familyRefund;
+  final double taxeFixe;
+  final double redevance;
   final double totalCarteGrise;
+  final double cashCarteGrise;
 
-  // Totaux
+  /// Cout apres remboursement eventuel, hors frais professionnels.
   final double totalInvested;
 
-  // Revente estimée (Europe / Base AutoScout)
+  /// Somme a decaisser avant le remboursement famille nombreuse.
+  final double cashRequired;
+
   final double resaleEUQuick;
   final double resaleEUMarket;
-
-  // Revente estimée (France / LeBonCoin)
   final double resaleFRQuick;
   final double resaleFRMarket;
 
-  // Bénéfices bruts (avant frais pro et TVA)
+  final double proCosts;
+  final bool vatOnMargin;
+  final bool calculationReliable;
+  final List<String> warnings;
+  final int comparableCount;
+
   double get grossProfitEUQuick => resaleEUQuick - totalInvested;
   double get grossProfitEUMarket => resaleEUMarket - totalInvested;
   double get grossProfitFRQuick => resaleFRQuick - totalInvested;
   double get grossProfitFRMarket => resaleFRMarket - totalInvested;
 
-  // TVA sur marge calculée spécifiquement : [(Prix Revente TTC - Prix Achat TTC) / 1,20] * 0,20
+  /// TVA sur marge : (prix de vente TTC - prix d'achat TTC) x 20/120.
+  /// Le regime ne s'applique que si l'achat ouvre droit au regime de la marge.
   double _calcTva(double resale) {
-    if (resale <= totalInvested) return 0;
-    return ((resale - totalInvested) / 1.20) * 0.20;
+    if (!vatOnMargin || resale <= vehicle.purchasePrice) return 0;
+    return (resale - vehicle.purchasePrice) / 6;
   }
 
   double get tvaMarginEUQuick => _calcTva(resaleEUQuick);
@@ -59,33 +64,30 @@ class CalculationResult {
   double get tvaMarginFRQuick => _calcTva(resaleFRQuick);
   double get tvaMarginFRMarket => _calcTva(resaleFRMarket);
 
-  // Frais professionnels
-  final double proCosts;
-
-  // Bénéfices Nets finaux (après TVA et frais pro)
   double get profitEUQuick => grossProfitEUQuick - tvaMarginEUQuick - proCosts;
-  double get profitEUMarket => grossProfitEUMarket - tvaMarginEUMarket - proCosts;
+  double get profitEUMarket =>
+      grossProfitEUMarket - tvaMarginEUMarket - proCosts;
   double get profitFRQuick => grossProfitFRQuick - tvaMarginFRQuick - proCosts;
-  double get profitFRMarket => grossProfitFRMarket - tvaMarginFRMarket - proCosts;
+  double get profitFRMarket =>
+      grossProfitFRMarket - tvaMarginFRMarket - proCosts;
 
-  // Marges (%)
-  double get marginEUQuick => totalInvested > 0 ? (profitEUQuick / totalInvested) * 100 : 0;
-  double get marginEUMarket => totalInvested > 0 ? (profitEUMarket / totalInvested) * 100 : 0;
-  double get marginFRQuick => totalInvested > 0 ? (profitFRQuick / totalInvested) * 100 : 0;
-  double get marginFRMarket => totalInvested > 0 ? (profitFRMarket / totalInvested) * 100 : 0;
+  double get marginEUQuick =>
+      totalInvested > 0 ? (profitEUQuick / totalInvested) * 100 : 0;
+  double get marginEUMarket =>
+      totalInvested > 0 ? (profitEUMarket / totalInvested) * 100 : 0;
+  double get marginFRQuick =>
+      totalInvested > 0 ? (profitFRQuick / totalInvested) * 100 : 0;
+  double get marginFRMarket =>
+      totalInvested > 0 ? (profitFRMarket / totalInvested) * 100 : 0;
 
-  // Risque basé sur la marge FR marché prioritairement
   RiskLevel get riskLevel {
-    final margin = marginFRMarket > 0 ? marginFRMarket : marginEUMarket;
-    if (margin >= 20) return RiskLevel.green;
-    if (margin >= 10) return RiskLevel.orange;
+    if (!calculationReliable || resaleFRMarket <= 0) return RiskLevel.red;
+    if (marginFRMarket >= 15 && comparableCount >= 3) return RiskLevel.green;
+    if (marginFRMarket >= 7) return RiskLevel.orange;
     return RiskLevel.red;
   }
 
-  // Vétusté appliquée (nombre d'années)
   final int vetustYears;
-
-  // Abattements explicites pour l'affichage
   final int familyCO2Deduction;
   final int familyWeightDeduction;
   final int ageReductionPct;
@@ -96,10 +98,15 @@ class CalculationResult {
     required this.malusCO2,
     required this.malusCO2BeforeVetuste,
     required this.malusPoids,
+    required this.cashMalusCO2,
+    required this.cashMalusPoids,
+    required this.familyRefund,
     required this.taxeFixe,
     required this.redevance,
     required this.totalCarteGrise,
+    required this.cashCarteGrise,
     required this.totalInvested,
+    required this.cashRequired,
     required this.resaleEUQuick,
     required this.resaleEUMarket,
     required this.resaleFRQuick,
@@ -109,24 +116,39 @@ class CalculationResult {
     this.familyWeightDeduction = 0,
     this.ageReductionPct = 0,
     this.proCosts = 1500.0,
+    this.vatOnMargin = true,
+    this.calculationReliable = true,
+    this.warnings = const [],
+    this.comparableCount = 0,
   });
 
   Map<String, dynamic> toMap() => {
-        ...vehicle.toMap(),
-        'taxe_regionale': taxeRegionale,
-        'malus_co2': malusCO2,
-        'malus_co2_before_vetuste': malusCO2BeforeVetuste,
-        'malus_poids': malusPoids,
-        'total_carte_grise': totalCarteGrise,
-        'total_invested': totalInvested,
-        'resale_quick': resaleEUQuick, // Keep standard names for legacy compatibility
-        'resale_market': resaleEUMarket, 
-        'resale_fr_quick': resaleFRQuick,
-        'resale_fr_market': resaleFRMarket,
-        'pro_costs': proCosts,
-        'risk_level': riskLevel.name,
-        'vetust_years': vetustYears,
-        'family_co2_deduction': familyCO2Deduction,
-        'family_weight_deduction': familyWeightDeduction,
-      };
+    ...vehicle.toMap(),
+    'taxe_regionale': taxeRegionale,
+    'malus_co2': malusCO2,
+    'malus_co2_before_vetuste': malusCO2BeforeVetuste,
+    'malus_poids': malusPoids,
+    'cash_malus_co2': cashMalusCO2,
+    'cash_malus_poids': cashMalusPoids,
+    'family_refund': familyRefund,
+    'total_carte_grise': totalCarteGrise,
+    'cash_carte_grise': cashCarteGrise,
+    'total_invested': totalInvested,
+    'cash_required': cashRequired,
+    'resale_quick': resaleEUQuick,
+    'resale_market': resaleEUMarket,
+    'resale_fr_quick': resaleFRQuick,
+    'resale_fr_market': resaleFRMarket,
+    'profit_quick': profitFRQuick,
+    'profit_market': profitFRMarket,
+    'pro_costs': proCosts,
+    'vat_on_margin': vatOnMargin ? 1 : 0,
+    'risk_level': riskLevel.name,
+    'vetust_years': vetustYears,
+    'family_co2_deduction': familyCO2Deduction,
+    'family_weight_deduction': familyWeightDeduction,
+    'age_reduction_pct': ageReductionPct,
+    'calculation_reliable': calculationReliable ? 1 : 0,
+    'comparable_count': comparableCount,
+  };
 }

@@ -6,7 +6,7 @@ import '../services/autoscout_service.dart';
 import 'results_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  SearchScreen({super.key});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -21,8 +21,12 @@ class _SearchScreenState extends State<SearchScreen>
   String? _selectedModel;
   bool _isCustomModel = false;
   final _customModelCtrl = TextEditingController();
+  final _transportCtrl = TextEditingController(text: '800');
+  final _prepCtrl = TextEditingController(text: '500');
+  final _proCostsCtrl = TextEditingController(text: '1500');
+  bool _vatOnMargin = true;
   double _priceMax = 35000;
-  double _yearMin = 2018;
+  double _yearMin = 2020;
   double _kmMax = 150000;
 
   List<String> get _availableModels {
@@ -40,7 +44,7 @@ class _SearchScreenState extends State<SearchScreen>
     super.initState();
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: Duration(milliseconds: 800),
     )..forward();
   }
 
@@ -48,13 +52,27 @@ class _SearchScreenState extends State<SearchScreen>
   void dispose() {
     _animCtrl.dispose();
     _customModelCtrl.dispose();
+    _transportCtrl.dispose();
+    _prepCtrl.dispose();
+    _proCostsCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _search() async {
     if (_selectedBrand == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Veuillez sélectionner une marque')),
+        SnackBar(content: Text('Veuillez sélectionner une marque')),
+      );
+      return;
+    }
+    final transportCost = double.tryParse(_transportCtrl.text) ?? 0;
+    final prepCost = double.tryParse(_prepCtrl.text) ?? 0;
+    final proCosts = double.tryParse(_proCostsCtrl.text) ?? 0;
+    if (transportCost <= 0 || prepCost < 0 || proCosts < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Vérifiez les hypothèses de coûts avant la recherche.'),
+        ),
       );
       return;
     }
@@ -76,8 +94,10 @@ class _SearchScreenState extends State<SearchScreen>
 
       if (listings.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Aucune annonce trouvée. Essayez d\'élargir vos critères.'),
+          SnackBar(
+            content: Text(
+              'Aucune annonce trouvée. Essayez d\'élargir vos critères.',
+            ),
           ),
         );
         setState(() => _loading = false);
@@ -86,17 +106,24 @@ class _SearchScreenState extends State<SearchScreen>
 
       Navigator.of(context).push(
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => ResultsScreen(
+          pageBuilder: (_, _, _) => ResultsScreen(
             listings: listings,
             brand: _selectedBrand!,
             model: _effectiveModel,
+            transportCost: transportCost,
+            prepCost: prepCost,
+            proCosts: proCosts,
+            vatOnMargin: _vatOnMargin,
           ),
-          transitionsBuilder: (_, anim, __, child) {
+          transitionsBuilder: (_, anim, _, child) {
             return SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(1, 0),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+              position:
+                  Tween<Offset>(
+                    begin: Offset(1, 0),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+                  ),
               child: child,
             );
           },
@@ -104,9 +131,9 @@ class _SearchScreenState extends State<SearchScreen>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erreur: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -121,62 +148,81 @@ class _SearchScreenState extends State<SearchScreen>
         child: CustomScrollView(
           slivers: [
             SliverAppBar(
-              expandedHeight: 140,
+              expandedHeight: 124,
               floating: true,
               pinned: true,
-              backgroundColor: AppColors.surface,
+              centerTitle: false,
+              backgroundColor: context.appColors.surface,
               flexibleSpace: FlexibleSpaceBar(
-                title: Text('EuroCar Margin',
-                    style: GoogleFonts.outfit(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    )),
-                background: Container(
-                  decoration: const BoxDecoration(
+                titlePadding: EdgeInsetsDirectional.only(
+                  start: 16,
+                  bottom: 14,
+                  end: 16,
+                ),
+                title: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset(
+                      'assets/logo2.png',
+                      width: 42,
+                      height: 42,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => Icon(
+                        Icons.directions_car_rounded,
+                        color: context.appColors.accent,
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        'EuroCar Margin',
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                background: DecoratedBox(
+                  decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        Color(0xFF1a237e),
-                        AppColors.surface,
+                        context.appColors.gradientStart,
+                        context.appColors.surface,
                       ],
-                    ),
-                  ),
-                  child: Align(
-                    alignment: Alignment.topRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 50, right: 20),
-                      child: Image.asset('assets/logo2.png', height: 48, fit: BoxFit.contain, errorBuilder: (ctx, err, stack) => const Text('🇩🇪 → 🇫🇷', style: TextStyle(fontSize: 32))),
                     ),
                   ),
                 ),
               ),
             ),
             SliverPadding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // --- Marque ---
                     _sectionLabel('Marque'),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     _glassCard(
                       child: DropdownButtonFormField<String>(
-                        value: _selectedBrand,
-                        decoration: const InputDecoration(
+                        initialValue: _selectedBrand,
+                        decoration: InputDecoration(
                           prefixIcon: Icon(Icons.directions_car),
                           border: InputBorder.none,
                           hintText: 'Choisir une marque',
                         ),
-                        dropdownColor: AppColors.surfaceLight,
+                        dropdownColor: context.appColors.surfaceLight,
                         isExpanded: true,
                         menuMaxHeight: 400,
                         items: sortedBrands
-                            .map((b) => DropdownMenuItem(
-                                  value: b,
-                                  child: Text(b),
-                                ))
+                            .map(
+                              (b) => DropdownMenuItem(value: b, child: Text(b)),
+                            )
                             .toList(),
                         onChanged: (v) {
                           setState(() {
@@ -189,22 +235,22 @@ class _SearchScreenState extends State<SearchScreen>
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    SizedBox(height: 16),
 
                     // --- Modèle ---
                     _sectionLabel('Modèle'),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     _glassCard(
                       child: _isCustomModel
                           ? TextFormField(
                               controller: _customModelCtrl,
                               decoration: InputDecoration(
                                 hintText: 'Saisir le modèle...',
-                                prefixIcon: const Icon(Icons.edit),
+                                prefixIcon: Icon(Icons.edit),
                                 border: InputBorder.none,
                                 suffixIcon: _availableModels.isNotEmpty
                                     ? IconButton(
-                                        icon: const Icon(Icons.list, size: 20),
+                                        icon: Icon(Icons.list, size: 20),
                                         tooltip: 'Revenir à la liste',
                                         onPressed: () => setState(() {
                                           _isCustomModel = false;
@@ -215,24 +261,30 @@ class _SearchScreenState extends State<SearchScreen>
                               ),
                             )
                           : DropdownButtonFormField<String>(
-                              value: _selectedModel,
-                              decoration: const InputDecoration(
+                              initialValue: _selectedModel,
+                              decoration: InputDecoration(
                                 prefixIcon: Icon(Icons.model_training),
                                 border: InputBorder.none,
                                 hintText: 'Choisir un modèle',
                               ),
-                              dropdownColor: AppColors.surfaceLight,
+                              dropdownColor: context.appColors.surfaceLight,
                               isExpanded: true,
                               menuMaxHeight: 400,
                               items: [
-                                ..._availableModels.map((m) => DropdownMenuItem(
-                                      value: m,
-                                      child: Text(m),
-                                    )),
-                                const DropdownMenuItem(
+                                ..._availableModels.map(
+                                  (m) => DropdownMenuItem(
+                                    value: m,
+                                    child: Text(m),
+                                  ),
+                                ),
+                                DropdownMenuItem(
                                   value: '__custom__',
-                                  child: Text('✏️ Autre modèle...',
-                                      style: TextStyle(fontStyle: FontStyle.italic)),
+                                  child: Text(
+                                    '✏️ Autre modèle...',
+                                    style: TextStyle(
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
                                 ),
                               ],
                               onChanged: _selectedBrand == null
@@ -247,26 +299,26 @@ class _SearchScreenState extends State<SearchScreen>
                             ),
                     ),
 
-                    const SizedBox(height: 24),
+                    SizedBox(height: 24),
 
                     // --- Prix Max ---
                     _sliderSection(
                       icon: Icons.euro,
                       label: 'Prix max',
-                      value: '${_priceMax.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ')} €',
+                      value:
+                          '${_priceMax.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ')} €',
                       slider: Slider(
                         value: _priceMax,
                         min: 3000,
                         max: 100000,
                         divisions: 97,
-                        activeColor: AppColors.accent,
-                        inactiveColor: AppColors.cardBorder,
-                        onChanged: (v) =>
-                            setState(() => _priceMax = v),
+                        activeColor: context.appColors.accent,
+                        inactiveColor: context.appColors.cardBorder,
+                        onChanged: (v) => setState(() => _priceMax = v),
                       ),
                     ),
 
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
 
                     // --- Année min ---
                     _sliderSection(
@@ -275,36 +327,79 @@ class _SearchScreenState extends State<SearchScreen>
                       value: _yearMin.toInt().toString(),
                       slider: Slider(
                         value: _yearMin,
-                        min: 2005,
+                        min: 2020,
                         max: 2026,
-                        divisions: 21,
-                        activeColor: AppColors.accentPurple,
-                        inactiveColor: AppColors.cardBorder,
-                        onChanged: (v) =>
-                            setState(() => _yearMin = v),
+                        divisions: 6,
+                        activeColor: context.appColors.accentPurple,
+                        inactiveColor: context.appColors.cardBorder,
+                        onChanged: (v) => setState(() => _yearMin = v),
                       ),
                     ),
 
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
 
                     // --- Km Max ---
                     _sliderSection(
                       icon: Icons.speed,
                       label: 'Kilométrage max',
-                      value: '${_kmMax.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ')} km',
+                      value:
+                          '${_kmMax.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ')} km',
                       slider: Slider(
                         value: _kmMax,
                         min: 10000,
                         max: 300000,
                         divisions: 29,
-                        activeColor: AppColors.accentOrange,
-                        inactiveColor: AppColors.cardBorder,
-                        onChanged: (v) =>
-                            setState(() => _kmMax = v),
+                        activeColor: context.appColors.accentOrange,
+                        inactiveColor: context.appColors.cardBorder,
+                        onChanged: (v) => setState(() => _kmMax = v),
                       ),
                     ),
 
-                    const SizedBox(height: 32),
+                    SizedBox(height: 24),
+                    _sectionLabel('Hypothèses de rentabilité'),
+                    SizedBox(height: 8),
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: context.appColors.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: context.appColors.cardBorder),
+                      ),
+                      child: Column(
+                        children: [
+                          _responsivePair(
+                            _costField(
+                              'Transport',
+                              _transportCtrl,
+                              Icons.local_shipping_outlined,
+                            ),
+                            _costField(
+                              'Préparation',
+                              _prepCtrl,
+                              Icons.build_outlined,
+                            ),
+                          ),
+                          SizedBox(height: 10),
+                          _costField(
+                            'Frais professionnels / véhicule',
+                            _proCostsCtrl,
+                            Icons.business_center_outlined,
+                          ),
+                          SwitchListTile.adaptive(
+                            value: _vatOnMargin,
+                            contentPadding: EdgeInsets.zero,
+                            onChanged: (value) =>
+                                setState(() => _vatOnMargin = value),
+                            title: Text('TVA sur marge'),
+                            subtitle: Text(
+                              'Hypothèse prudente, à confirmer selon la facture du vendeur.',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    SizedBox(height: 32),
 
                     // --- Search Button ---
                     SizedBox(
@@ -313,21 +408,21 @@ class _SearchScreenState extends State<SearchScreen>
                       child: Container(
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(16),
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF1a237e), AppColors.accent],
+                          gradient: LinearGradient(
+                            colors: [context.appColors.gradientStart, context.appColors.accent],
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: AppColors.accent.withValues(alpha: 0.3),
+                              color: context.appColors.accent.withValues(alpha: 0.3),
                               blurRadius: 16,
-                              offset: const Offset(0, 4),
+                              offset: Offset(0, 4),
                             ),
                           ],
                         ),
                         child: ElevatedButton.icon(
                           onPressed: _loading ? null : _search,
                           icon: _loading
-                              ? const SizedBox(
+                              ? SizedBox(
                                   width: 20,
                                   height: 20,
                                   child: CircularProgressIndicator(
@@ -335,7 +430,7 @@ class _SearchScreenState extends State<SearchScreen>
                                     color: Colors.white,
                                   ),
                                 )
-                              : const Icon(Icons.search_rounded, size: 24),
+                              : Icon(Icons.search_rounded, size: 24),
                           label: Text(
                             _loading
                                 ? 'Recherche en cours...'
@@ -356,29 +451,33 @@ class _SearchScreenState extends State<SearchScreen>
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    SizedBox(height: 24),
 
                     // --- Info Card ---
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppColors.accent.withValues(alpha: 0.08),
+                        color: context.appColors.accent.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: AppColors.accent.withValues(alpha: 0.2),
+                          color: context.appColors.accent.withValues(alpha: 0.2),
                         ),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.info_outline,
-                              color: AppColors.accent, size: 20),
-                          const SizedBox(width: 12),
+                          Icon(
+                            Icons.info_outline,
+                            color: context.appColors.accent,
+                            size: 20,
+                          ),
+                          SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              'Les annonces sont récupérées en temps réel depuis AutoScout24.de. '
-                              'La rentabilité est calculée automatiquement.',
+                              'Analyse croisée Allemagne / France. La marge n’est affichée qu’avec '
+                              'au moins 3 annonces comparables et les données fiscales vérifiées '
+                              '(P.6, V.7 et masse G).',
                               style: TextStyle(
-                                color: AppColors.textSecondary,
+                                color: context.appColors.textSecondary,
                                 fontSize: 12,
                                 height: 1.4,
                               ),
@@ -387,7 +486,7 @@ class _SearchScreenState extends State<SearchScreen>
                         ],
                       ),
                     ),
-                    const SizedBox(height: 40),
+                    SizedBox(height: 40),
                   ],
                 ),
               ),
@@ -404,18 +503,53 @@ class _SearchScreenState extends State<SearchScreen>
       style: GoogleFonts.outfit(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        color: AppColors.textSecondary,
+        color: context.appColors.textSecondary,
       ),
+    );
+  }
+
+  Widget _costField(
+    String label,
+    TextEditingController controller,
+    IconData icon,
+  ) {
+    return TextField(
+      controller: controller,
+      keyboardType: TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        suffixText: '€',
+      ),
+    );
+  }
+
+  Widget _responsivePair(Widget first, Widget second) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 430) {
+          return Column(
+            children: [first, SizedBox(height: 10), second],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: first),
+            SizedBox(width: 10),
+            Expanded(child: second),
+          ],
+        );
+      },
     );
   }
 
   Widget _glassCard({required Widget child}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: context.appColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder),
+        border: Border.all(color: context.appColors.cardBorder),
       ),
       child: child,
     );
@@ -428,28 +562,34 @@ class _SearchScreenState extends State<SearchScreen>
     required Widget slider,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: context.appColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.cardBorder),
+        border: Border.all(color: context.appColors.cardBorder),
       ),
       child: Column(
         children: [
           Row(
             children: [
-              Icon(icon, color: AppColors.textSecondary, size: 18),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      color: AppColors.textSecondary, fontSize: 14)),
-              const Spacer(),
-              Text(value,
-                  style: GoogleFonts.outfit(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  )),
+              Icon(icon, color: context.appColors.textSecondary, size: 18),
+              SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+              Spacer(),
+              Text(
+                value,
+                style: GoogleFonts.outfit(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: context.appColors.textPrimary,
+                ),
+              ),
             ],
           ),
           slider,

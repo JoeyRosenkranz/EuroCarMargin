@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../models/car_listing.dart';
 
 /// Service pour récupérer les prix de revente sur LeBonCoin.fr
 /// Utilise l'API interne LeBonCoin pour les recherches voitures
 class LeBonCoinService {
   static const _apiUrl = 'https://api.leboncoin.fr/finder/search';
+  static const _apiKey = String.fromEnvironment('LEBONCOIN_API_KEY');
   static const _userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -49,7 +51,7 @@ class LeBonCoinService {
   };
 
   /// Rechercher les prix du marché français sur LeBonCoin
-  /// Retourne les prix quick (Q1), market (moyenne), premium (Q3)
+  /// Retourne les prix quick (Q1), market (mediane), premium (Q3)
   Future<LeBonCoinPriceResult> fetchPrices({
     required String brand,
     String? model,
@@ -137,7 +139,7 @@ class LeBonCoinService {
         'Accept': 'application/json',
         'Origin': 'https://www.leboncoin.fr',
         'Referer': 'https://www.leboncoin.fr/',
-        'api_key': 'ba0c2dad52b3ec',
+        if (_apiKey.isNotEmpty) 'api_key': _apiKey,
       },
       body: json.encode(body),
     );
@@ -164,7 +166,8 @@ class LeBonCoinService {
         ? '$brand+$model'
         : brand;
 
-    var url = 'https://www.leboncoin.fr/recherche?category=2'
+    var url =
+        'https://www.leboncoin.fr/recherche?category=2'
         '&text=${Uri.encodeComponent(searchQuery)}'
         '&owner_type=pro'
         '&brand=$brandSlug';
@@ -184,7 +187,8 @@ class LeBonCoinService {
       Uri.parse(finalUrl),
       headers: {
         'User-Agent': _userAgent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'fr-FR,fr;q=0.9',
       },
     );
@@ -195,16 +199,19 @@ class LeBonCoinService {
 
     // Try to extract __NEXT_DATA__ JSON
     final body = response.body;
-    final nextDataMatch = RegExp(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-            dotAll: true)
-        .firstMatch(body);
+    final nextDataMatch = RegExp(
+      r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+      dotAll: true,
+    ).firstMatch(body);
 
     if (nextDataMatch != null) {
       try {
-        final jsonData = json.decode(nextDataMatch.group(1)!) as Map<String, dynamic>;
+        final jsonData =
+            json.decode(nextDataMatch.group(1)!) as Map<String, dynamic>;
         final props = jsonData['props'] as Map<String, dynamic>? ?? {};
         final pageProps = props['pageProps'] as Map<String, dynamic>? ?? {};
-        final searchData = pageProps['searchData'] as Map<String, dynamic>? ?? {};
+        final searchData =
+            pageProps['searchData'] as Map<String, dynamic>? ?? {};
         final ads = searchData['ads'] as List<dynamic>? ?? [];
         return _extractPricesFromAds(ads, brandSlug);
       } catch (_) {
@@ -228,7 +235,10 @@ class LeBonCoinService {
   }
 
   /// Extract prices from LeBonCoin ads JSON
-  LeBonCoinPriceResult _extractPricesFromAds(List<dynamic> ads, String brandSlug) {
+  LeBonCoinPriceResult _extractPricesFromAds(
+    List<dynamic> ads,
+    String brandSlug,
+  ) {
     final prices = <double>[];
     final listings = <LeBonCoinListing>[];
 
@@ -246,29 +256,31 @@ class LeBonCoinService {
 
         // Extract listing details
         final attributes = ad['attributes'] as List<dynamic>? ?? [];
-        String? year;
-        String? mileage;
+        int? year;
+        int? mileage;
         String? fuel;
 
         for (final attr in attributes) {
           if (attr is! Map<String, dynamic>) continue;
           final key = attr['key'] as String? ?? '';
           final value = attr['value'] as String? ?? '';
-          if (key == 'regdate') year = value;
-          if (key == 'mileage') mileage = value;
+          if (key == 'regdate') year = _parseInt(value);
+          if (key == 'mileage') mileage = _parseInt(value);
           if (key == 'fuel') fuel = value;
         }
 
-        listings.add(LeBonCoinListing(
-          title: ad['subject'] as String? ?? '',
-          price: price,
-          year: year,
-          mileage: mileage,
-          fuel: fuel,
-          url: ad['url'] as String? ?? '',
-          imageUrl: _extractImageUrl(ad),
-          location: _extractLocation(ad),
-        ));
+        listings.add(
+          LeBonCoinListing(
+            title: ad['subject'] as String? ?? '',
+            price: price,
+            year: year,
+            mileage: mileage,
+            fuel: fuel,
+            url: ad['url'] as String? ?? '',
+            imageUrl: _extractImageUrl(ad),
+            location: _extractLocation(ad),
+          ),
+        );
       } catch (_) {
         continue;
       }
@@ -282,15 +294,17 @@ class LeBonCoinService {
       market: stats.market,
       premium: stats.premium,
       count: prices.length,
-      listings: listings.take(10).toList(), // Keep top 10
+      listings: listings,
     );
   }
 
   String? _extractImageUrl(Map<String, dynamic> ad) {
     final images = ad['images'] as Map<String, dynamic>?;
     if (images == null) return null;
-    final urls = images['urls_thumb'] as List<dynamic>? ??
+    final urls =
+        images['urls_large'] as List<dynamic>? ??
         images['urls'] as List<dynamic>? ??
+        images['urls_thumb'] as List<dynamic>? ??
         images['small_url'] as List<dynamic>?;
     if (urls != null && urls.isNotEmpty) return urls.first as String?;
     return null;
@@ -307,21 +321,27 @@ class LeBonCoinService {
   /// Calculate Q1, mean of lowest 10 Pro, Q3 from a list of prices
   LeBonCoinPriceResult _calculateStats(List<double> prices) {
     prices.sort();
-    
-    // Eurocar Margin 2026 rule: exclusive average of the 10 lowest PRO prices
-    final lowest10 = prices.take(10).toList();
-    final avgLowest10 = lowest10.reduce((a, b) => a + b) / lowest10.length;
-    
+
     final q1Index = (prices.length * 0.25).floor().clamp(0, prices.length - 1);
     final q3Index = (prices.length * 0.75).floor().clamp(0, prices.length - 1);
+    final middle = prices.length ~/ 2;
+    final median = prices.length.isOdd
+        ? prices[middle]
+        : (prices[middle - 1] + prices[middle]) / 2;
 
     return LeBonCoinPriceResult(
       quick: prices[q1Index].roundToDouble(),
-      market: avgLowest10.roundToDouble(),
+      market: median.roundToDouble(),
       premium: prices[q3Index].roundToDouble(),
       count: prices.length,
       listings: [],
     );
+  }
+
+  int? _parseInt(String? value) {
+    if (value == null) return null;
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return int.tryParse(digits);
   }
 
   void dispose() => _client.close();
@@ -329,10 +349,10 @@ class LeBonCoinService {
 
 /// Résultat des prix LeBonCoin
 class LeBonCoinPriceResult {
-  final double quick;   // Vente rapide (Q1)
-  final double market;  // Prix moyen marché
+  final double quick; // Vente rapide (Q1)
+  final double market; // Prix moyen marché
   final double premium; // Prix premium (Q3)
-  final int count;      // Nombre d'annonces
+  final int count; // Nombre d'annonces
   final List<LeBonCoinListing> listings;
 
   const LeBonCoinPriceResult({
@@ -343,22 +363,90 @@ class LeBonCoinPriceResult {
     this.listings = const [],
   });
 
-  factory LeBonCoinPriceResult.empty() => const LeBonCoinPriceResult(
-        quick: 0,
-        market: 0,
-        premium: 0,
-        count: 0,
-      );
+  factory LeBonCoinPriceResult.empty() =>
+      const LeBonCoinPriceResult(quick: 0, market: 0, premium: 0, count: 0);
 
   bool get hasData => count > 0 && market > 0;
+
+  /// Construit un echantillon reellement comparable : modele present dans le
+  /// titre, annee +/- 1, kilometrage proche et energie identique si disponible.
+  ComparableMarketEstimate comparableFor(CarListing target) {
+    final modelTokens = target.model
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((token) => token.length >= 2)
+        .toList();
+    bool sameFuel(String? a, String? b) {
+      String norm(String? value) {
+        final text = (value ?? '').toLowerCase();
+        if (text.contains('diesel')) return 'diesel';
+        if (text.contains('elect')) return 'electric';
+        if (text.contains('hybrid')) return 'hybrid';
+        if (text.contains('benzin') || text.contains('essence')) {
+          return 'petrol';
+        }
+        return '';
+      }
+
+      final left = norm(a);
+      final right = norm(b);
+      if (right.isEmpty) return true;
+      return left.isNotEmpty && left == right;
+    }
+
+    final matches = listings.where((ad) {
+      final title = ad.title.toLowerCase();
+      final modelOk = modelTokens.isEmpty || modelTokens.every(title.contains);
+      final yearOk =
+          target.year == null ||
+          (ad.year != null && (ad.year! - target.year!).abs() <= 1);
+      final tolerance = target.mileage == null
+          ? null
+          : (target.mileage! * .20).round().clamp(15000, 50000);
+      final mileageOk =
+          tolerance == null ||
+          (ad.mileage != null &&
+              (ad.mileage! - target.mileage!).abs() <= tolerance);
+      return modelOk && yearOk && mileageOk && sameFuel(ad.fuel, target.fuel);
+    }).toList();
+
+    if (matches.isEmpty) return ComparableMarketEstimate.empty();
+    final prices = matches.map((ad) => ad.price).toList()..sort();
+    final q1 = prices[(prices.length * .25).floor()];
+    final middle = prices.length ~/ 2;
+    final median = prices.length.isOdd
+        ? prices[middle]
+        : (prices[middle - 1] + prices[middle]) / 2;
+    return ComparableMarketEstimate(
+      quick: q1.roundToDouble(),
+      market: median.roundToDouble(),
+      count: matches.length,
+    );
+  }
+}
+
+class ComparableMarketEstimate {
+  final double quick;
+  final double market;
+  final int count;
+
+  const ComparableMarketEstimate({
+    required this.quick,
+    required this.market,
+    required this.count,
+  });
+
+  const ComparableMarketEstimate.empty() : quick = 0, market = 0, count = 0;
+
+  bool get isReliable => count >= 3 && market > 0;
 }
 
 /// Une annonce LeBonCoin simplifiée
 class LeBonCoinListing {
   final String title;
   final double price;
-  final String? year;
-  final String? mileage;
+  final int? year;
+  final int? mileage;
   final String? fuel;
   final String url;
   final String? imageUrl;

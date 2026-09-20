@@ -8,7 +8,7 @@ import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key});
+  HistoryScreen({super.key});
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -27,12 +27,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _loadSearches() async {
-    setState(() => _loading = true);
-    final data = await DatabaseHelper.instance.getAllSearches();
-    setState(() {
-      _searches = data;
-      _loading = false;
-    });
+    if (mounted) setState(() => _loading = true);
+    try {
+      final data = await DatabaseHelper.instance.getAllSearches();
+      if (!mounted) return;
+      setState(() {
+        _searches = data;
+        _loading = false;
+      });
+    } catch (_) {
+      // SQLite may be temporarily unavailable during platform startup.
+      // Keep the rest of the application usable and show an empty history.
+      if (!mounted) return;
+      setState(() {
+        _searches = [];
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _deleteSearch(int id) async {
@@ -44,19 +55,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
+        backgroundColor: context.appColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Supprimer tout l\'historique ?'),
-        content: const Text('Cette action est irréversible.'),
+        title: Text('Supprimer tout l\'historique ?'),
+        content: Text('Cette action est irréversible.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
+            child: Text('Annuler'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: AppColors.accentRed),
-            child: const Text('Supprimer'),
+            style: TextButton.styleFrom(foregroundColor: context.appColors.accentRed),
+            child: Text('Supprimer'),
           ),
         ],
       ),
@@ -69,12 +80,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   void _openDetail(Map<String, dynamic> m) {
     final vehicle = VehicleEntry.fromMap(m);
-    final result = TaxCalculator().calculate(vehicle);
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => DashboardScreen(result: result),
-      ),
+    final children = ((m['family_co2_deduction'] as num?)?.toInt() ?? 0) ~/ 20;
+    final result = TaxCalculator().calculate(
+      vehicle,
+      childrenCount: children,
+      lbcMarketPrice: (m['resale_fr_market'] as num?)?.toDouble(),
+      lbcQuickPrice: (m['resale_fr_quick'] as num?)?.toDouble(),
+      comparableCount: (m['comparable_count'] as num?)?.toInt() ?? 0,
+      proCosts: (m['pro_costs'] as num?)?.toDouble() ?? 1500,
+      vatOnMargin: ((m['vat_on_margin'] as num?)?.toInt() ?? 1) == 1,
     );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => DashboardScreen(result: result)));
   }
 
   @override
@@ -85,26 +103,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
         actions: [
           if (_searches.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.delete_sweep_rounded,
-                  color: AppColors.accentRed),
+              icon: Icon(
+                Icons.delete_sweep_rounded,
+                color: context.appColors.accentRed,
+              ),
               onPressed: _deleteAll,
               tooltip: 'Tout supprimer',
             ),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator())
           : _searches.isEmpty
-              ? _buildEmpty()
-              : RefreshIndicator(
-                  onRefresh: _loadSearches,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _searches.length,
-                    itemBuilder: (context, i) =>
-                        _buildSearchCard(_searches[i], i),
-                  ),
-                ),
+          ? _buildEmpty()
+          : RefreshIndicator(
+              onRefresh: _loadSearches,
+              child: ListView.builder(
+                padding: EdgeInsets.all(16),
+                itemCount: _searches.length,
+                itemBuilder: (context, i) => _buildSearchCard(_searches[i], i),
+              ),
+            ),
     );
   }
 
@@ -113,20 +132,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.history_rounded,
-              size: 64, color: AppColors.textMuted),
-          const SizedBox(height: 16),
+          Icon(Icons.history_rounded, size: 64, color: context.appColors.textMuted),
+          SizedBox(height: 16),
           Text(
             'Aucune recherche sauvegardée',
             style: GoogleFonts.outfit(
               fontSize: 18,
-              color: AppColors.textSecondary,
+              color: context.appColors.textSecondary,
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(
             'Vos calculs apparaîtront ici',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 14),
           ),
         ],
       ),
@@ -142,43 +160,46 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final createdAt = m['created_at'] as String? ?? '';
     final totalInvested = (m['total_invested'] as num?)?.toDouble() ?? 0;
 
-    final riskColor = AppColors.riskColor(riskLevel);
+    final riskColor = context.appColors.riskColor(riskLevel);
     DateTime? date;
     try {
       date = DateTime.parse(createdAt);
     } catch (_) {}
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: 12),
       child: Dismissible(
         key: ValueKey(m['id']),
         direction: DismissDirection.endToStart,
         onDismissed: (_) => _deleteSearch(m['id'] as int),
         background: Container(
           alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 20),
+          padding: EdgeInsets.only(right: 20),
           decoration: BoxDecoration(
-            color: AppColors.accentRed.withValues(alpha: 0.2),
+            color: context.appColors.accentRed.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(16),
           ),
-          child: const Icon(Icons.delete_forever_rounded,
-              color: AppColors.accentRed, size: 28),
+          child: Icon(
+            Icons.delete_forever_rounded,
+            color: context.appColors.accentRed,
+            size: 28,
+          ),
         ),
         child: GestureDetector(
           onTap: () => _openDetail(m),
           child: AnimatedContainer(
             duration: Duration(milliseconds: 300 + index * 50),
             curve: Curves.easeOut,
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              color: context.appColors.surface,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.cardBorder),
+              border: Border.all(color: context.appColors.cardBorder),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.12),
                   blurRadius: 8,
-                  offset: const Offset(0, 2),
+                  offset: Offset(0, 2),
                 ),
               ],
             ),
@@ -193,7 +214,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const SizedBox(width: 14),
+                SizedBox(width: 14),
                 // Info
                 Expanded(
                   child: Column(
@@ -204,20 +225,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         style: GoogleFonts.outfit(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
+                          color: context.appColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: 4),
                       Text(
                         '$year • Investi: ${_fmt.format(totalInvested)}',
-                        style: const TextStyle(
-                            color: AppColors.textSecondary, fontSize: 13),
+                        style: TextStyle(
+                          color: context.appColors.textSecondary,
+                          fontSize: 13,
+                        ),
                       ),
                       if (date != null)
                         Text(
                           _dateFmt.format(date),
-                          style: const TextStyle(
-                              color: AppColors.textMuted, fontSize: 11),
+                          style: TextStyle(
+                            color: context.appColors.textMuted,
+                            fontSize: 11,
+                          ),
                         ),
                     ],
                   ),
@@ -234,10 +259,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         color: riskColor,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: riskColor.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
@@ -246,19 +273,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         riskLevel == 'green'
                             ? 'Rentable'
                             : riskLevel == 'orange'
-                                ? 'Modéré'
-                                : 'Risqué',
+                            ? 'Modéré'
+                            : 'Risqué',
                         style: TextStyle(
-                            color: riskColor,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600),
+                          color: riskColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(width: 4),
-                const Icon(Icons.chevron_right_rounded,
-                    color: AppColors.textMuted),
+                SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: context.appColors.textMuted,
+                ),
               ],
             ),
           ),

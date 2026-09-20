@@ -95,13 +95,112 @@ class AutoScoutService {
       );
 
       if (response.statusCode != 200) {
-        throw Exception(
-            'AutoScout24 returned ${response.statusCode} for $url');
+        throw Exception('AutoScout24 returned ${response.statusCode} for $url');
       }
 
       return _parseListingsFromHtml(response.body);
     } catch (e) {
       throw Exception('Erreur de recherche AutoScout24: $e');
+    }
+  }
+
+  /// Charge la fiche complète d'une annonce pour récupérer les caractéristiques
+  /// qui ne figurent pas toujours dans la liste de résultats. Aucune valeur
+  /// fiscale n'est inventée : en cas d'absence, le champ reste manquant.
+  Future<CarListing> enrichListing(CarListing listing) async {
+    if (listing.detailUrl.isEmpty || listing.hasRequiredTechnicalData) {
+      return listing;
+    }
+
+    final detailUrl = listing.detailUrl.startsWith('http')
+        ? listing.detailUrl
+        : '$_baseUrl${listing.detailUrl.startsWith('/') ? '' : '/'}${listing.detailUrl}';
+    final requestUrl = kIsWeb
+        ? 'https://corsproxy.io/?${Uri.encodeComponent(detailUrl)}'
+        : detailUrl;
+
+    try {
+      final response = await _client.get(
+        Uri.parse(requestUrl),
+        headers: {
+          'User-Agent': _userAgent,
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'de-DE,de;q=0.9,en;q=0.5',
+        },
+      );
+      if (response.statusCode != 200) return listing;
+
+      final document = html_parser.parse(response.body);
+      final normalizedText = (document.body?.text ?? '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+
+      int? numberFrom(RegExp expression, {int group = 1}) {
+        final value = expression.firstMatch(normalizedText)?.group(group);
+        if (value == null) return null;
+        return int.tryParse(value.replaceAll(RegExp(r'[^0-9]'), ''));
+      }
+
+      final powerMatch = RegExp(
+        r'(?:Leistung|Power)[^0-9]{0,40}(\d{1,4})\s*kW(?:\s*\((\d{1,4})\s*PS\))?',
+        caseSensitive: false,
+      ).firstMatch(normalizedText);
+      final powerKW = powerMatch == null
+          ? null
+          : int.tryParse(powerMatch.group(1) ?? '');
+      final powerPS = powerMatch == null
+          ? null
+          : int.tryParse(powerMatch.group(2) ?? '');
+      final co2 = numberFrom(
+        RegExp(
+          r'(?:CO₂|CO2)[^0-9]{0,100}(\d{1,3})\s*g/km',
+          caseSensitive: false,
+        ),
+      );
+      final weight = numberFrom(
+        RegExp(
+          r'(?:Leergewicht|Gewicht|vehicle weight)[^0-9]{0,80}([0-9.\s]{3,8})\s*kg',
+          caseSensitive: false,
+        ),
+      );
+      final seats = numberFrom(
+        RegExp(
+          r'(?:Sitzplätze|Anzahl Sitzplätze|seats)[^0-9]{0,40}(\d{1,2})',
+          caseSensitive: false,
+        ),
+      );
+      final electricRange = numberFrom(
+        RegExp(
+          r'(?:Elektrische Reichweite|electric range)[^0-9]{0,80}(\d{1,4})\s*km',
+          caseSensitive: false,
+        ),
+      );
+      final registration = RegExp(
+        r'(?:Erstzulassung|first registration)[^0-9]{0,30}(\d{1,2})[./-](\d{4})',
+        caseSensitive: false,
+      ).firstMatch(normalizedText);
+
+      return listing.copyWith(
+        powerKW: powerKW,
+        powerPS: powerPS ??
+            (powerKW == null ? null : (powerKW * 1.35962).round()),
+        co2: co2,
+        weightG1: weight != null && weight > 500 ? weight : null,
+        seats: seats,
+        electricRangeKm: electricRange,
+        firstRegistrationMonth:
+            int.tryParse(registration?.group(1) ?? ''),
+        year: int.tryParse(registration?.group(2) ?? ''),
+        description: normalizedText.isEmpty
+            ? listing.description
+            : normalizedText.substring(
+                0,
+                normalizedText.length > 20000 ? 20000 : normalizedText.length,
+              ),
+      );
+    } catch (_) {
+      return listing;
     }
   }
 
@@ -127,8 +226,7 @@ class AutoScoutService {
     return listings
         .map((item) {
           try {
-            return CarListing.fromAutoScoutJson(
-                item as Map<String, dynamic>);
+            return CarListing.fromAutoScoutJson(item as Map<String, dynamic>);
           } catch (_) {
             return null;
           }
@@ -158,14 +256,26 @@ class AutoScoutService {
 
         // Image
         final imgEl = article.querySelector('img');
-        final imgSrc = imgEl?.attributes['src'] ??
-            imgEl?.attributes['data-src'] ??
-            '';
+        final srcSet = imgEl?.attributes['srcset'] ?? '';
+        final srcSetUrls = srcSet
+            .split(',')
+            .map((entry) => entry.trim().split(RegExp(r'\s+')).first)
+            .where((url) => url.isNotEmpty)
+            .toList();
+        var imgSrc = srcSetUrls.isNotEmpty
+            ? srcSetUrls.last
+            : imgEl?.attributes['data-src'] ?? imgEl?.attributes['src'] ?? '';
+        if (imgSrc.startsWith('//')) imgSrc = 'https:$imgSrc';
+        imgSrc = imgSrc.replaceAllMapped(
+          RegExp(r'/(\d{2,4})x(\d{2,4})(?=[./][^/]*$)'),
+          (_) => '/1600x1200',
+        );
 
         // Specs (pills)
         final pills = article.querySelectorAll('span');
         int? mileage;
         int? year;
+        int? firstRegistrationMonth;
         String? fuel;
         int? powerKW;
         int? powerPS;
@@ -175,34 +285,44 @@ class AutoScoutService {
           if (text.contains('km')) {
             mileage = _parseNumber(text);
           } else if (RegExp(r'\d{2}/\d{4}').hasMatch(text)) {
-            year = int.tryParse(
-                RegExp(r'(\d{4})').firstMatch(text)?.group(1) ?? '');
+            final registration = RegExp(r'(\d{1,2})/(\d{4})').firstMatch(text);
+            firstRegistrationMonth = int.tryParse(registration?.group(1) ?? '');
+            year = int.tryParse(registration?.group(2) ?? '');
           } else if (text.contains('kW')) {
             powerKW = int.tryParse(
-                RegExp(r'(\d+)\s*kW').firstMatch(text)?.group(1) ?? '');
+              RegExp(r'(\d+)\s*kW').firstMatch(text)?.group(1) ?? '',
+            );
             powerPS = int.tryParse(
-                RegExp(r'(\d+)\s*PS').firstMatch(text)?.group(1) ?? '');
-          } else if (['Benzin', 'Diesel', 'Elektro', 'Hybrid']
-              .any((f) => text.contains(f))) {
+              RegExp(r'(\d+)\s*PS').firstMatch(text)?.group(1) ?? '',
+            );
+          } else if ([
+            'Benzin',
+            'Diesel',
+            'Elektro',
+            'Hybrid',
+          ].any((f) => text.contains(f))) {
             fuel = text;
           }
         }
 
-        listings.add(CarListing(
-          id: href.hashCode.toString(),
-          title: title.isNotEmpty ? title : 'Véhicule',
-          brand: '',
-          model: '',
-          price: price,
-          priceFormatted: priceText,
-          mileage: mileage,
-          year: year,
-          fuel: fuel,
-          powerKW: powerKW,
-          powerPS: powerPS,
-          imageUrls: imgSrc.isNotEmpty ? [imgSrc] : [],
-          detailUrl: href,
-        ));
+        listings.add(
+          CarListing(
+            id: href.hashCode.toString(),
+            title: title.isNotEmpty ? title : 'Véhicule',
+            brand: '',
+            model: '',
+            price: price,
+            priceFormatted: priceText,
+            mileage: mileage,
+            year: year,
+            firstRegistrationMonth: firstRegistrationMonth,
+            fuel: fuel,
+            powerKW: powerKW,
+            powerPS: powerPS,
+            imageUrls: imgSrc.isNotEmpty ? [imgSrc] : [],
+            detailUrl: href,
+          ),
+        );
       } catch (_) {
         continue;
       }
@@ -255,7 +375,8 @@ class AutoScoutService {
       final prices = listings.map((l) => l.price).toList()..sort();
       final avg = prices.reduce((a, b) => a + b) / prices.length;
       final low = prices[prices.length ~/ 4]; // Q1
-      final high = prices[(prices.length * 3 ~/ 4).clamp(0, prices.length - 1)]; // Q3
+      final high =
+          prices[(prices.length * 3 ~/ 4).clamp(0, prices.length - 1)]; // Q3
 
       return {
         'quick': low.roundToDouble(),
