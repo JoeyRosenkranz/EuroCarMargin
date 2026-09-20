@@ -2,6 +2,7 @@
 ///
 /// Sources de reference (revues le 20/09/2026) :
 /// - CIBS, art. L421-62 : baremes CO2 WLTP 2020-2026
+/// - CIBS, art. L421-63 : baremes CO2 NEDC 2015-2019
 /// - CIBS, art. L421-7-2 : coefficient mensuel de decote
 /// - CIBS, art. L421-75 : baremes de masse 2022-2026
 /// - Simulateur officiel Service-Public / France Titres : taxes regionales
@@ -247,8 +248,82 @@ class Co2Schedule {
   });
 }
 
+/// Barèmes NEDC historiques du CIBS, art. L421-63. Ils sont appliqués aux
+/// véhicules importés selon leur année de première immatriculation à l'étranger.
+const List<int> nedc2015And2016Amounts = [
+  150, 150, 150, 150, 150,
+  250, 250, 250, 250, 250,
+  500, 500, 500, 500, 500,
+  900, 900, 900, 900, 900,
+  1600, 1600, 1600, 1600, 1600,
+  2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200,
+  2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200,
+  3000, 3000, 3000, 3000, 3000,
+  3600, 3600, 3600, 3600, 3600,
+  4000, 4000, 4000, 4000, 4000,
+  6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500, 6500,
+];
+
+const List<int> nedc2017Amounts = [
+  50, 53, 60, 73, 90, 113, 140, 173, 210, 253, 300, 353, 410,
+  473, 540, 613, 690, 773, 860, 953, 1050, 1153, 1260, 1373, 1490,
+  1613, 1740, 1873, 2010, 2153, 2300, 2453, 2610, 2773, 2940, 3113,
+  3290, 3473, 3660, 3853, 4050, 4253, 4460, 4673, 4890, 5113, 5340,
+  5573, 5810, 6053, 6300, 6553, 6810, 7073, 7340, 7613, 7890, 8173,
+  8460, 8753, 9050, 9353, 9660, 9973,
+];
+
+const List<int> nedc2018Amounts = [
+  50, 53, 60, 73, 90, 113, 140, 173, 210, 253, 300, 353, 410,
+  473, 540, 613, 690, 773, 860, 953, 1050, 1153, 1260, 1373, 1490,
+  1613, 1740, 1873, 2010, 2153, 2300, 2453, 2610, 2773, 2940, 3113,
+  3290, 3473, 3660, 3853, 4050, 4253, 4460, 4673, 4890, 5113, 5340,
+  5573, 5810, 6053, 6300, 6553, 6810, 7073, 7340, 7613, 7890, 8173,
+  8460, 8753, 9050, 9353, 9660, 9973, 10290,
+];
+
+const List<int> nedc2019Amounts = [
+  35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 113, 140, 173,
+  210, 253, 300, 353, 410, 473, 540, 613, 690, 773, 860, 953, 1050,
+  1101, 1153, 1260, 1373, 1490, 1613, 1740, 1873, 2010, 2153, 2300,
+  2453, 2610, 2773, 2940, 3113, 3290, 3473, 3660, 3756, 3853, 4050,
+  4253, 4460, 4673, 4890, 5113, 5340, 5573, 5810, 6053, 6300, 6553,
+  6810, 7073, 7340, 7613, 7890, 8173, 8460, 8753, 9050, 9353, 9660,
+  9973, 10290,
+];
+
 /// Le choix 2024 s'applique aussi aux immatriculations de janvier-fevrier 2025.
 const Map<int, Co2Schedule> co2Schedules = {
+  2015: Co2Schedule(
+    threshold: 131,
+    maximum: 8000,
+    maximumFrom: 201,
+    amounts: nedc2015And2016Amounts,
+  ),
+  2016: Co2Schedule(
+    threshold: 131,
+    maximum: 8000,
+    maximumFrom: 201,
+    amounts: nedc2015And2016Amounts,
+  ),
+  2017: Co2Schedule(
+    threshold: 127,
+    maximum: 10000,
+    maximumFrom: 191,
+    amounts: nedc2017Amounts,
+  ),
+  2018: Co2Schedule(
+    threshold: 120,
+    maximum: 10500,
+    maximumFrom: 185,
+    amounts: nedc2018Amounts,
+  ),
+  2019: Co2Schedule(
+    threshold: 117,
+    maximum: 10500,
+    maximumFrom: 191,
+    amounts: nedc2019Amounts,
+  ),
   2020: Co2Schedule(
     threshold: 138,
     maximum: 20000,

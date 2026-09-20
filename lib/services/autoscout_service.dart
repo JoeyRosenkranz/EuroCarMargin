@@ -37,7 +37,7 @@ class AutoScoutService {
       'cy': country,
       'atype': 'C', // Cars
       'desc': '0', // Ascending
-      'sort': 'standard',
+      'sort': 'price',
     };
 
     if (priceFrom != null) params['pricefrom'] = priceFrom.toString();
@@ -160,7 +160,7 @@ class AutoScoutService {
       );
       final weight = numberFrom(
         RegExp(
-          r'(?:Leergewicht|Gewicht|vehicle weight)[^0-9]{0,80}([0-9.\s]{3,8})\s*kg',
+          r'(?:Leergewicht|Masse in fahrbereitem Zustand|vehicle weight|curb weight)[^0-9]{0,80}([0-9.\s]{3,8})\s*kg',
           caseSensitive: false,
         ),
       );

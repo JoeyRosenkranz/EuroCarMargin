@@ -260,10 +260,11 @@ class LeBonCoinService {
         for (final attr in attributes) {
           if (attr is! Map<String, dynamic>) continue;
           final key = attr['key'] as String? ?? '';
-          final value = attr['value'] as String? ?? '';
-          if (key == 'regdate') year = _parseInt(value);
-          if (key == 'mileage') mileage = _parseInt(value);
-          if (key == 'fuel') fuel = value;
+          final value = attr['value']?.toString() ?? '';
+          final label = attr['value_label']?.toString() ?? value;
+          if (key == 'regdate') year = _parseInt(label);
+          if (key == 'mileage') mileage = _parseInt(label);
+          if (key == 'fuel') fuel = label;
         }
 
         listings.add(
@@ -365,46 +366,42 @@ class LeBonCoinPriceResult {
 
   bool get hasData => count > 0 && market > 0;
 
-  /// Construit un echantillon reellement comparable : modele present dans le
-  /// titre, annee +/- 1, kilometrage proche et energie identique si disponible.
+  /// Construit un échantillon strict : même marque/modèle, même année, énergie
+  /// identique, kilométrage proche et même variante identifiable. Une version
+  /// électrique non identifiable n'est jamais comparée à toute la gamme.
   ComparableMarketEstimate comparableFor(CarListing target) {
-    final modelTokens = target.model
-        .toLowerCase()
-        .split(RegExp(r'[^a-z0-9]+'))
-        .where((token) => token.length >= 2)
-        .toList();
-    bool sameFuel(String? a, String? b) {
-      String norm(String? value) {
-        final text = (value ?? '').toLowerCase();
-        if (text.contains('diesel')) return 'diesel';
-        if (text.contains('elect')) return 'electric';
-        if (text.contains('hybrid')) return 'hybrid';
-        if (text.contains('benzin') || text.contains('essence')) {
-          return 'petrol';
-        }
-        return '';
-      }
-
-      final left = norm(a);
-      final right = norm(b);
-      if (right.isEmpty) return true;
-      return left.isNotEmpty && left == right;
+    final targetFuel = _fuelFamily(target.fuel);
+    final targetVariant = _variantSignature(target.title);
+    if (target.year == null || targetFuel.isEmpty) {
+      return ComparableMarketEstimate.empty();
     }
+    if (targetFuel == 'electric' && targetVariant.isEmpty) {
+      return ComparableMarketEstimate.empty();
+    }
+    final brand = _compact(target.brand);
+    final model = _compact(target.model);
 
     final matches = listings.where((ad) {
-      final title = ad.title.toLowerCase();
-      final modelOk = modelTokens.isEmpty || modelTokens.every(title.contains);
-      final yearOk =
-          target.year == null ||
-          (ad.year != null && (ad.year! - target.year!).abs() <= 1);
+      final title = _compact(ad.title);
+      final identityOk =
+          brand.isNotEmpty && model.isNotEmpty &&
+          title.contains(brand) && title.contains(model);
+      final yearOk = ad.year == target.year;
       final tolerance = target.mileage == null
           ? null
-          : (target.mileage! * .20).round().clamp(15000, 50000);
+          : (target.mileage! * .15).round().clamp(15000, 40000);
       final mileageOk =
           tolerance == null ||
           (ad.mileage != null &&
               (ad.mileage! - target.mileage!).abs() <= tolerance);
-      return modelOk && yearOk && mileageOk && sameFuel(ad.fuel, target.fuel);
+      final variantOk = targetVariant.every(
+        (token) => _variantSignature(ad.title).contains(token),
+      );
+      return identityOk &&
+          yearOk &&
+          mileageOk &&
+          _fuelFamily(ad.fuel) == targetFuel &&
+          variantOk;
     }).toList();
 
     if (matches.isEmpty) return ComparableMarketEstimate.empty();
@@ -418,7 +415,56 @@ class LeBonCoinPriceResult {
       quick: q1.roundToDouble(),
       market: median.roundToDouble(),
       count: matches.length,
+      listings: matches,
     );
+  }
+
+  static String _compact(String? value) => (value ?? '')
+      .toLowerCase()
+      .replaceAll('é', 'e')
+      .replaceAll('è', 'e')
+      .replaceAll('ê', 'e')
+      .replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  static String _fuelFamily(String? value) {
+    final text = (value ?? '').toLowerCase();
+    if (text.contains('plug') ||
+        text.contains('phev') ||
+        text.contains('rechargeable')) {
+      return 'phev';
+    }
+    if (text.contains('elect') || text.contains('elektro')) return 'electric';
+    if (text.contains('hybrid') || text.contains('hybride')) return 'hybrid';
+    if (text.contains('diesel')) return 'diesel';
+    if (text.contains('benzin') || text.contains('essence')) return 'petrol';
+    return '';
+  }
+
+  static Set<String> _variantSignature(String value) {
+    final text = value.toLowerCase().replaceAll(',', '.');
+    final result = <String>{};
+    const variants = <String, List<String>>{
+      'performance': ['performance'],
+      'competition': ['competition'],
+      'long-range': ['long range', 'grande autonomie'],
+      'standard-range': ['standard range', 'autonomie standard'],
+      'dual-motor': ['dual motor'],
+      'propulsion': ['propulsion'],
+      'quattro': ['quattro'],
+      'xdrive': ['xdrive'],
+      'sportback': ['sportback'],
+      'avant': ['avant', 'break', 'touring'],
+    };
+    for (final entry in variants.entries) {
+      if (entry.value.any(text.contains)) result.add(entry.key);
+    }
+    final battery = RegExp(r'\b(\d{2,3})\s*kwh\b').firstMatch(text);
+    if (battery != null) result.add('${battery.group(1)}kwh');
+    final engine = RegExp(
+      r'\b(\d[.]\d)\s*(?:tfsi|tsi|tdi|litre|l\b)',
+    ).firstMatch(text);
+    if (engine != null) result.add('${engine.group(1)}l');
+    return result;
   }
 }
 
@@ -426,14 +472,20 @@ class ComparableMarketEstimate {
   final double quick;
   final double market;
   final int count;
+  final List<LeBonCoinListing> listings;
 
   const ComparableMarketEstimate({
     required this.quick,
     required this.market,
     required this.count,
+    this.listings = const [],
   });
 
-  const ComparableMarketEstimate.empty() : quick = 0, market = 0, count = 0;
+  const ComparableMarketEstimate.empty()
+    : quick = 0,
+      market = 0,
+      count = 0,
+      listings = const [];
 
   bool get isReliable => count >= 3 && market > 0;
 }

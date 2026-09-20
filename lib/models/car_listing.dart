@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'vehicle_model.dart';
 
 /// Modèle pour une annonce automobile scrappée depuis AutoScout24
@@ -53,10 +55,15 @@ class CarListing {
   });
 
   bool get hasRequiredTechnicalData {
-    final isElectric = (fuel ?? '').toLowerCase().contains('elektro');
+    final energy = (fuel ?? '').toLowerCase();
+    final isElectric = energy.contains('elektro') ||
+        energy.contains('electric') ||
+        energy.contains('électrique');
+    final needsWeight = !isElectric && (year ?? DateTime.now().year) >= 2022;
     return estimatedFiscalPower > 0 &&
-        weightG1 != null &&
-        weightG1! > 0 &&
+        year != null &&
+        mileage != null &&
+        (!needsWeight || (weightG1 != null && weightG1! > 0)) &&
         (isElectric || (co2 != null && co2! > 0));
   }
 
@@ -107,11 +114,19 @@ class CarListing {
     );
   }
 
-  /// Puissance administrative des VP thermiques homologues depuis 2020.
-  /// PA = 1,34 + 1,8 × (P/100)² + 3,87 × (P/100), P en kW.
+  /// Estimation de la puissance administrative à partir des formules légales.
+  /// Avant 2020, le calcul utilise aussi le CO2 NEDC ; depuis 2020 il repose
+  /// uniquement sur la puissance nette maximale en kW.
   int get estimatedFiscalPower {
     final kw = powerKW;
-    if (kw == null || kw <= 0 || (year ?? 0) < 2020) return 0;
+    if (kw == null || kw <= 0) return 0;
+    if ((year ?? 0) < 2020) {
+      final emissions = co2;
+      if (emissions == null || emissions <= 0) return 0;
+      return (emissions / 45 + math.pow(kw / 40, 1.6))
+          .round()
+          .clamp(1, 100);
+    }
     final p = kw / 100;
     return (1.34 + 1.8 * p * p + 3.87 * p).round().clamp(1, 100);
   }
@@ -190,6 +205,25 @@ class CarListing {
     co2 ??= _parseNumber(vehicle['co2Content']?.toString());
     weightG1 ??= _parseNumber(vehicle['weight']?.toString());
 
+    // AutoScout déplace régulièrement ces valeurs entre vehicleDetails et des
+    // blocs structurés (WLTP/consommation). On inspecte les clés, sans jamais
+    // prendre un nombre qui ne soit pas rattaché explicitement à la donnée.
+    co2 ??= _findNumberByKeys(json, const [
+      'co2emission',
+      'co2content',
+      'co2value',
+    ]);
+    weightG1 ??= _findNumberByKeys(json, const [
+      'curbweight',
+      'emptyweight',
+      'leergewicht',
+    ]);
+    seats ??= _findNumberByKeys(json, const ['seats', 'numberofseats']);
+    electricRangeKm ??= _findNumberByKeys(json, const [
+      'electricrange',
+      'wltprange',
+    ]);
+
     // Also try top-level fields
     mileage ??= _parseNumber(vehicle['mileage']?.toString());
     year ??= vehicle['firstRegistrationYear'] as int?;
@@ -246,6 +280,49 @@ class CarListing {
     if (s == null) return null;
     final cleaned = s.replaceAll(RegExp(r'[^\d]'), '');
     return int.tryParse(cleaned);
+  }
+
+  static int? _findNumberByKeys(dynamic node, List<String> acceptedKeys) {
+    if (node is Map) {
+      for (final entry in node.entries) {
+        final key = entry.key
+            .toString()
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]'), '');
+        if (acceptedKeys.any(key.contains)) {
+          final value = _structuredNumber(entry.value);
+          if (value != null && value > 0) return value;
+        }
+      }
+      for (final value in node.values) {
+        final found = _findNumberByKeys(value, acceptedKeys);
+        if (found != null) return found;
+      }
+    } else if (node is List) {
+      for (final value in node) {
+        final found = _findNumberByKeys(value, acceptedKeys);
+        if (found != null) return found;
+      }
+    }
+    return null;
+  }
+
+  static int? _structuredNumber(dynamic value) {
+    if (value is num) return value.round();
+    if (value is String) return _parseNumber(value);
+    if (value is Map) {
+      for (final key in const ['value', 'rawValue', 'formattedValue', 'text']) {
+        if (value.containsKey(key)) {
+          final parsed = _structuredNumber(value[key]);
+          if (parsed != null) return parsed;
+        }
+      }
+      if (value.length == 1) return _structuredNumber(value.values.first);
+    }
+    if (value is List && value.length == 1) {
+      return _structuredNumber(value.first);
+    }
+    return null;
   }
 
   static (int?, int?) _parseRegistration(String value) {
@@ -311,6 +388,10 @@ class CarListing {
     final fullText =
         '$title ${description ?? ''} ${fuel ?? ''} ${transmission ?? ''}'
             .toLowerCase();
+    final identity = '$brand $model'.trim();
+    final trim = title.toLowerCase().startsWith(identity.toLowerCase())
+        ? title.substring(identity.length).trim()
+        : title.trim();
 
     // Ne retenir un CV que s'il est explicitement qualifie de fiscal. Dans
     // certaines annonces, "CV" designe la puissance moteur et fausserait P.6.
@@ -355,18 +436,19 @@ class CarListing {
     return VehicleEntry(
       brand: brand,
       model: model,
-      year: year ?? DateTime.now().year,
+      trim: trim,
+      year: year ?? 0,
       // Mois inconnu : decembre est le choix fiscal conservateur pour ne pas
       // surestimer la decote liee a l'age.
       firstRegistrationMonth: firstRegistrationMonth ?? 12,
       mileage: mileage,
-      powerDIN: powerPS ?? (powerKW != null ? (powerKW! * 1.36).round() : 100),
+      powerDIN: powerPS ?? (powerKW != null ? (powerKW! * 1.36).round() : 0),
       // ON NE MET PLUS DE VALEUR AU HASARD (0 si non trouvé pour le rouge UI)
       powerFiscal: calculatedCV,
       weightG1: extractedWeight ?? (weightG1 ?? 0),
       co2WLTP: extractedCO2 ?? (co2 ?? 0),
       fuelType: fuel,
-      seats: seats ?? 5,
+      seats: seats ?? 0,
       electricRangeKm: electricRangeKm,
       purchasePrice: price,
       region: region,

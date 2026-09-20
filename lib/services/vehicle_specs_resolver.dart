@@ -11,15 +11,9 @@ class VehicleSpecsResolver {
   }
 
   CarListing resolve(CarListing target, List<CarListing> candidates) {
-    final peers = candidates.where((candidate) {
-      if (candidate.id == target.id) return false;
-      if (target.year == null || target.powerKW == null) return false;
-      return _normalize(candidate.brand) == _normalize(target.brand) &&
-          _normalize(candidate.model) == _normalize(target.model) &&
-          candidate.year == target.year &&
-          candidate.powerKW == target.powerKW &&
-          _fuelFamily(candidate.fuel) == _fuelFamily(target.fuel);
-    }).toList();
+    final peers = candidates
+        .where((candidate) => matchesTechnicalVariant(target, candidate))
+        .toList();
 
     final co2 = target.co2 ?? _consensus(peers.map((e) => e.co2));
     final weight =
@@ -41,6 +35,23 @@ class VehicleSpecsResolver {
       electricRangeKm: range,
       technicalSource: 'Consensus moteur (${peers.length} annonces)',
     );
+  }
+
+  /// N'accepte comme source technique que le même modèle, la même année, le
+  /// même moteur (kW), la même énergie et la même carrosserie lorsqu'elle est
+  /// identifiable dans le titre.
+  bool matchesTechnicalVariant(CarListing target, CarListing candidate) {
+    if (candidate.id == target.id) return false;
+    if (target.year == null || target.powerKW == null) return false;
+    if (_normalize(candidate.brand) != _normalize(target.brand) ||
+        _normalize(candidate.model) != _normalize(target.model) ||
+        candidate.year != target.year ||
+        candidate.powerKW != target.powerKW ||
+        _fuelFamily(candidate.fuel) != _fuelFamily(target.fuel)) {
+      return false;
+    }
+    final targetBody = _bodyStyle(target.title);
+    return targetBody.isEmpty || _bodyStyle(candidate.title) == targetBody;
   }
 
   int? _consensus(Iterable<int?> values) {
@@ -78,5 +89,21 @@ class VehicleSpecsResolver {
     }
     if (fuel.contains('benzin') || fuel.contains('essence')) return 'petrol';
     return _normalize(fuel);
+  }
+
+  String _bodyStyle(String value) {
+    final normalized = value.toLowerCase();
+    const styles = {
+      'sportback': ['sportback'],
+      'avant': ['avant', 'break', 'estate', 'touring'],
+      'sedan': ['limousine', 'sedan', 'berline'],
+      'cabriolet': ['cabrio', 'cabriolet', 'roadster'],
+      'coupe': ['coupé', 'coupe'],
+      'suv': ['suv'],
+    };
+    for (final entry in styles.entries) {
+      if (entry.value.any(normalized.contains)) return entry.key;
+    }
+    return '';
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import '../models/car_listing.dart';
 import '../models/calculation_result.dart';
 import '../services/database_helper.dart';
 import '../services/leboncoin_service.dart';
@@ -115,9 +116,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         childrenCount: (_res.familyCO2Deduction > 0) ? 3 : 0,
         lbcMarketPrice: newMarket,
         lbcQuickPrice: newMarket > 0 ? newMarket * .95 : 0,
-        comparableCount: newMarket > 0
-            ? (_res.comparableCount >= 3 ? _res.comparableCount : 3)
-            : 0,
+        // Une saisie manuelle ne fabrique pas artificiellement trois annonces.
+        comparableCount: newMarket > 0 ? _res.comparableCount : 0,
         proCosts: newProCosts,
         vatOnMargin: _res.vatOnMargin,
       );
@@ -125,24 +125,41 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _fetchComparableFrenchAd() async {
+    final service = LeBonCoinService();
     try {
-      final service = LeBonCoinService();
       final result = await service.fetchPrices(
         brand: r.vehicle.brand,
         model: r.vehicle.model,
         yearFrom: r.vehicle.year,
         yearTo: r.vehicle.year, // Try matching exact year first
       );
+      final comparable = result.comparableFor(
+        CarListing(
+          id: 'dashboard-target',
+          title:
+              '${r.vehicle.brand} ${r.vehicle.model} ${r.vehicle.trim}'.trim(),
+          brand: r.vehicle.brand,
+          model: r.vehicle.model,
+          price: r.vehicle.purchasePrice,
+          priceFormatted: '',
+          mileage: r.vehicle.mileage,
+          year: r.vehicle.year,
+          fuel: r.vehicle.fuelType,
+          detailUrl: '',
+        ),
+      );
       if (mounted) {
         setState(() {
-          if (result.listings.isNotEmpty) {
-            _frenchAd = result.listings.first;
+          if (comparable.listings.isNotEmpty) {
+            _frenchAd = comparable.listings.first;
           }
           _loadingFrenchAd = false;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _loadingFrenchAd = false);
+    } finally {
+      service.dispose();
     }
   }
 
@@ -864,7 +881,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildProfitCards() {
     final mileageLabel = r.vehicle.mileage == null
         ? 'km à vérifier'
-        : '${r.vehicle.mileage} km';
+        : '${NumberFormat.decimalPattern('fr_FR').format(r.vehicle.mileage)} km';
     return _animatedCard(
       interval: Interval(0.4, 0.8),
       child: Column(
@@ -935,7 +952,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
           SizedBox(height: 12),
           Text(
-            '${r.vehicle.firstRegistrationMonth.toString().padLeft(2, '0')}/${r.vehicle.year} • $mileageLabel • ${r.vehicle.region}',
+            'Mise en circulation '
+            '${r.vehicle.firstRegistrationMonth.toString().padLeft(2, '0')}/${r.vehicle.year}'
+            ' • Compteur $mileageLabel • ${r.vehicle.region}',
             style: TextStyle(
               color: context.appColors.textSecondary,
               fontSize: 13,
@@ -1209,15 +1228,11 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
           Text(
-            value <= 0
-                ? (label.contains('Y') ||
-                          label.contains('Malus') ||
-                          label.contains('Taxe')
-                      ? '0 € (Exonéré)'
-                      : '0 €')
-                : _fmt.format(value),
+            value <= 0 ? '0 €' : _fmt.format(value),
             style: TextStyle(
-              color: value <= 0 ? context.appColors.accentGreen : context.appColors.textPrimary,
+              color: value <= 0
+                  ? context.appColors.textSecondary
+                  : context.appColors.textPrimary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

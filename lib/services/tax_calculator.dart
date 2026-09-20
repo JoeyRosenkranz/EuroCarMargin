@@ -197,9 +197,10 @@ class TaxCalculator {
     final year = firstRegistration.year;
     if (_isPHEV(fuelType)) {
       // Les hybrides rechargeables sont exoneres pour les premieres
-      // immatriculations 2022 a 2024. Depuis 2025, l'abattement est de
-      // 200 kg, plafonne a 15 % de la masse.
-      if (year <= 2024) return 0;
+      // immatriculations 2022 a 2024 uniquement si l'autonomie électrique en
+      // ville dépasse 50 km. Depuis 2025, l'abattement est de 200 kg,
+      // plafonné à 15 % de la masse.
+      if (year <= 2024 && (electricRangeKm ?? 0) > 50) return 0;
       if (year >= 2025) {
         return max(0, weight - min(200, (weight * 0.15).floor()));
       }
@@ -354,6 +355,17 @@ class TaxCalculator {
       vehicle.year,
       vehicle.firstRegistrationMonth,
     );
+    final isEV = _isEVOrHydrogen(vehicle.fuelType, vehicle.model);
+    final isPHEV = _isPHEV(vehicle.fuelType);
+
+    if (vehicle.year < 1900 || vehicle.year > registrationDate.year) {
+      warnings.add('Année de première immatriculation manquante ou invalide.');
+      reliable = false;
+    }
+    if ((vehicle.fuelType ?? '').trim().isEmpty) {
+      warnings.add('Énergie du véhicule manquante.');
+      reliable = false;
+    }
 
     if (vehicle.powerFiscal <= 0) {
       warnings.add(
@@ -361,18 +373,29 @@ class TaxCalculator {
       );
       reliable = false;
     }
-    if (vehicle.co2WLTP <= 0 &&
-        !_isEVOrHydrogen(vehicle.fuelType, vehicle.model)) {
-      warnings.add('CO2 WLTP manquant (champ V.7).');
+    if (vehicle.co2WLTP <= 0 && !isEV) {
+      warnings.add('CO₂ homologué manquant (champ V.7).');
       reliable = false;
     }
-    if (vehicle.weightG1 <= 0) {
+    if (vehicle.year >= 2022 && !isEV && vehicle.weightG1 <= 0) {
       warnings.add('Masse en ordre de marche manquante (champ G, pas G.1).');
       reliable = false;
     }
-    if (vehicle.year < 2020) {
+    if (!isEV &&
+        vehicle.year >= 2015 &&
+        vehicle.year <= registrationDate.year &&
+        _schedule(firstRegistration) == null) {
       warnings.add(
-        'Vehicule anterieur a 2020 : le bareme NEDC doit etre verifie avec le simulateur officiel.',
+        'Barème CO₂ indisponible pour cette année : calcul du malus bloqué.',
+      );
+      reliable = false;
+    }
+    if (isPHEV &&
+        vehicle.year >= 2022 &&
+        vehicle.year <= 2024 &&
+        vehicle.electricRangeKm == null) {
+      warnings.add(
+        'Autonomie électrique en ville manquante : exonération masse PHEV non appliquée.',
       );
       reliable = false;
     }
@@ -389,7 +412,12 @@ class TaxCalculator {
     }
 
     final familyEligible = childrenCount >= 3 && vehicle.seats >= 5;
-    if (childrenCount >= 3 && vehicle.seats < 5) {
+    if (childrenCount >= 3 && vehicle.seats <= 0) {
+      warnings.add(
+        'Nombre de places manquant : avantage famille nombreuse non appliqué.',
+      );
+      reliable = false;
+    } else if (childrenCount >= 3 && vehicle.seats < 5) {
       warnings.add(
         'Abattement famille refuse : le vehicule doit avoir au moins 5 places.',
       );

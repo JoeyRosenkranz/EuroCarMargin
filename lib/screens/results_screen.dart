@@ -74,14 +74,55 @@ class _ResultsScreenState extends State<ResultsScreen> {
     }
   }
 
-  Future<CarListing> _enrichListing(CarListing listing) async {
+  Future<CarListing> _enrichListing(
+    CarListing listing, {
+    bool searchExactPeers = false,
+  }) async {
     final current = _listings.firstWhere(
       (item) => item.id == listing.id,
       orElse: () => listing,
     );
     if (current.hasRequiredTechnicalData) return current;
     if (mounted) setState(() => _loadingTechnical.add(listing.id));
-    final enriched = await _autoScoutService.enrichListing(current);
+    var enriched = await _autoScoutService.enrichListing(current);
+    var candidates = <CarListing>[..._listings, enriched];
+    enriched = _specsResolver.resolve(enriched, candidates);
+
+    if (searchExactPeers &&
+        !enriched.hasRequiredTechnicalData &&
+        enriched.year != null &&
+        enriched.powerKW != null) {
+      try {
+        final exactResults = await _autoScoutService.searchListings(
+          brand: enriched.brand,
+          model: enriched.model,
+          yearFrom: enriched.year,
+          yearTo: enriched.year,
+        );
+        final peers = exactResults
+            .where(
+              (candidate) =>
+                  _specsResolver.matchesTechnicalVariant(enriched, candidate),
+            )
+            .take(8)
+            .toList();
+        final enrichedPeers = <CarListing>[];
+        for (var start = 0; start < peers.length; start += 3) {
+          final end = start + 3 < peers.length ? start + 3 : peers.length;
+          enrichedPeers.addAll(
+            await Future.wait([
+              for (var index = start; index < end; index++)
+                _autoScoutService.enrichListing(peers[index]),
+            ]),
+          );
+        }
+        candidates = [...candidates, ...exactResults, ...enrichedPeers];
+        enriched = _specsResolver.resolve(enriched, candidates);
+      } catch (error) {
+        debugPrint('Recherche de fiche technique comparable impossible: $error');
+      }
+    }
+
     if (!mounted) return enriched;
     setState(() {
       final index = _listings.indexWhere((item) => item.id == listing.id);
@@ -89,7 +130,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
       _listings = _specsResolver.resolveAll(_listings);
       _loadingTechnical.remove(listing.id);
     });
-    return enriched;
+    return _listings.firstWhere(
+      (item) => item.id == listing.id,
+      orElse: () => enriched,
+    );
   }
 
   Future<void> _fetchLeBonCoinPrices() async {
@@ -103,7 +147,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   .map((l) => l.year ?? 2020)
                   .reduce((a, b) => a < b ? a : b)
             : null,
+        yearTo: widget.listings.isNotEmpty
+            ? widget.listings
+                  .map((l) => l.year ?? DateTime.now().year)
+                  .reduce((a, b) => a > b ? a : b)
+            : null,
       );
+      service.dispose();
       if (mounted) {
         setState(() {
           _lbcPrices = result;
@@ -117,7 +167,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   Future<void> _openDetail(CarListing listing) async {
     var resolvedListing = listing;
-    if (!listing.hasRequiredTechnicalData) {
+    var comparable =
+        _lbcPrices?.comparableFor(listing) ??
+        ComparableMarketEstimate.empty();
+    final needsLookup =
+        !listing.hasRequiredTechnicalData || !comparable.isReliable;
+    if (needsLookup) {
       showDialog<void>(
         context: context,
         barrierDismissible: false,
@@ -130,18 +185,41 @@ class _ResultsScreenState extends State<ResultsScreen> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               SizedBox(width: 16),
-              Expanded(child: Text('Lecture de la fiche technique…')),
+              Expanded(
+                child: Text('Vérification de la fiche et du marché français…'),
+              ),
             ],
           ),
         ),
       );
-      resolvedListing = await _enrichListing(listing);
+      if (!listing.hasRequiredTechnicalData) {
+        resolvedListing = await _enrichListing(
+          listing,
+          searchExactPeers: true,
+        );
+      }
+      comparable =
+          _lbcPrices?.comparableFor(resolvedListing) ??
+          ComparableMarketEstimate.empty();
+      if (!comparable.isReliable && resolvedListing.year != null) {
+        final service = LeBonCoinService();
+        try {
+          final exactFrenchMarket = await service.fetchPrices(
+            brand: resolvedListing.brand,
+            model: resolvedListing.model,
+            yearFrom: resolvedListing.year,
+            yearTo: resolvedListing.year,
+          );
+          comparable = exactFrenchMarket.comparableFor(resolvedListing);
+        } catch (error) {
+          debugPrint('Marché français exact indisponible: $error');
+        } finally {
+          service.dispose();
+        }
+      }
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
     }
-    final comparable =
-        _lbcPrices?.comparableFor(resolvedListing) ??
-        ComparableMarketEstimate.empty();
 
     final vehicle = resolvedListing
         .toVehicleEntry(region: _selectedRegion)
@@ -492,7 +570,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                     SizedBox(height: 8),
                     Text(
                       comparable.count >= 3
-                          ? '${comparable.count} annonces françaises comparables · année ±1 · kilométrage proche'
+                          ? '${comparable.count} annonces françaises strictes · même année, énergie et version'
                           : 'Prix de revente masqué : moins de 3 annonces réellement comparables.',
                       style: TextStyle(
                         color: context.appColors.textMuted,

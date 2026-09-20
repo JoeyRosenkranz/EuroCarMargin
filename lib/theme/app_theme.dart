@@ -42,10 +42,11 @@ class AppColors {
 }
 
 class AppLightColors {
-  static const background = Color(0xFFF4F7F9);
-  static const surface = Color(0xFFFFFFFF);
-  static const surfaceLight = Color(0xFFEAF0F3);
-  static const cardBorder = Color(0xFFD5E0E5);
+  // Palette claire volontairement chaude et mate : aucun fond blanc pur.
+  static const background = Color(0xFFECE9E2);
+  static const surface = Color(0xFFF7F3EC);
+  static const surfaceLight = Color(0xFFE3DED4);
+  static const cardBorder = Color(0xFFCFC8BC);
   static const accent = Color(0xFF087A70);
   static const accentGreen = Color(0xFF147D53);
   static const accentOrange = Color(0xFF9B5A00);
@@ -55,8 +56,8 @@ class AppLightColors {
   static const textPrimary = Color(0xFF101C24);
   static const textSecondary = Color(0xFF465B68);
   static const textMuted = Color(0xFF70838E);
-  static const gradientStart = Color(0xFFC8F2EA);
-  static const gradientEnd = Color(0xFF8CDED0);
+  static const gradientStart = Color(0xFFCFE5DD);
+  static const gradientEnd = Color(0xFFAED4C8);
 }
 
 class AdaptiveAppColors {

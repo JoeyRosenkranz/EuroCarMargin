@@ -75,7 +75,7 @@ void main() {
       );
     });
 
-    test('hybride rechargeable 2024 exonéré du malus masse', () {
+    test('PHEV 2024 exonéré du malus masse seulement au-delà de 50 km', () {
       expect(
         calculator.calcMalusPoids(
           2200,
@@ -83,8 +83,53 @@ void main() {
           firstRegistrationMonth: 12,
           fuelType: 'Hybride rechargeable',
           model: 'SUV PHEV',
+          electricRangeKm: 60,
         ),
         0,
+      );
+      expect(
+        calculator.calcMalusPoids(
+          2200,
+          anneeImmat: 2024,
+          firstRegistrationMonth: 12,
+          fuelType: 'Hybride rechargeable',
+          model: 'SUV PHEV',
+          electricRangeKm: 40,
+        ),
+        greaterThan(0),
+      );
+    });
+
+    test('barèmes NEDC historiques RS3 sans fausse exonération', () {
+      expect(
+        calculator.calcMalusCO2BeforeVetuste(
+          192,
+          2015,
+          firstRegistrationMonth: 12,
+          fuelType: 'Benzin',
+          model: 'RS 3',
+        ),
+        6500,
+      );
+      expect(
+        calculator.calcMalusCO2BeforeVetuste(
+          189,
+          2017,
+          firstRegistrationMonth: 9,
+          fuelType: 'Benzin',
+          model: 'RS 3',
+        ),
+        9660,
+      );
+      expect(
+        calculator.calcMalusCO2BeforeVetuste(
+          189,
+          2018,
+          firstRegistrationMonth: 8,
+          fuelType: 'Benzin',
+          model: 'RS 3',
+        ),
+        10500,
       );
     });
 

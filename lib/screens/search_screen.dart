@@ -25,9 +25,12 @@ class _SearchScreenState extends State<SearchScreen>
   final _prepCtrl = TextEditingController(text: '500');
   final _proCostsCtrl = TextEditingController(text: '1500');
   bool _vatOnMargin = true;
-  double _priceMax = 35000;
-  double _yearMin = 2020;
+  RangeValues _priceRange = const RangeValues(500, 35000);
+  late RangeValues _yearRange;
   double _kmMax = 150000;
+
+  static const double _minimumYear = 1990;
+  double get _currentYear => DateTime.now().year.toDouble();
 
   List<String> get _availableModels {
     if (_selectedBrand == null) return [];
@@ -42,6 +45,7 @@ class _SearchScreenState extends State<SearchScreen>
   @override
   void initState() {
     super.initState();
+    _yearRange = RangeValues(_minimumYear, _currentYear);
     _animCtrl = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: 800),
@@ -85,8 +89,10 @@ class _SearchScreenState extends State<SearchScreen>
       final listings = await service.searchListings(
         brand: _selectedBrand!,
         model: modelQuery,
-        priceTo: _priceMax.toInt(),
-        yearFrom: _yearMin.toInt(),
+        priceFrom: _priceRange.start.toInt(),
+        priceTo: _priceRange.end.toInt(),
+        yearFrom: _yearRange.start.toInt(),
+        yearTo: _yearRange.end.toInt(),
         kmTo: _kmMax.toInt(),
       );
 
@@ -129,11 +135,16 @@ class _SearchScreenState extends State<SearchScreen>
           },
         ),
       );
-    } catch (e) {
+    } catch (error, stackTrace) {
+      debugPrint('Recherche AutoScout24 impossible: $error\n$stackTrace');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Aucune annonce trouvée. Modifiez les filtres puis réessayez.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -301,38 +312,47 @@ class _SearchScreenState extends State<SearchScreen>
 
                     SizedBox(height: 24),
 
-                    // --- Prix Max ---
+                    // --- Plage de prix ---
                     _sliderSection(
                       icon: Icons.euro,
-                      label: 'Prix max',
-                      value:
-                          '${_priceMax.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ')} €',
-                      slider: Slider(
-                        value: _priceMax,
-                        min: 3000,
-                        max: 100000,
-                        divisions: 97,
+                      label: 'Prix min. — max.',
+                      value: '${_formatNumber(_priceRange.start)} — '
+                          '${_formatNumber(_priceRange.end)} €',
+                      slider: RangeSlider(
+                        values: _priceRange,
+                        min: 500,
+                        max: 150000,
+                        divisions: 299,
+                        labels: RangeLabels(
+                          '${_formatNumber(_priceRange.start)} €',
+                          '${_formatNumber(_priceRange.end)} €',
+                        ),
                         activeColor: context.appColors.accent,
                         inactiveColor: context.appColors.cardBorder,
-                        onChanged: (v) => setState(() => _priceMax = v),
+                        onChanged: (v) => setState(() => _priceRange = v),
                       ),
                     ),
 
                     SizedBox(height: 12),
 
-                    // --- Année min ---
+                    // --- Plage d'années ---
                     _sliderSection(
                       icon: Icons.calendar_today,
-                      label: 'Année min',
-                      value: _yearMin.toInt().toString(),
-                      slider: Slider(
-                        value: _yearMin,
-                        min: 2020,
-                        max: 2026,
-                        divisions: 6,
+                      label: 'Année min. — max.',
+                      value: '${_yearRange.start.toInt()} — '
+                          '${_yearRange.end.toInt()}',
+                      slider: RangeSlider(
+                        values: _yearRange,
+                        min: _minimumYear,
+                        max: _currentYear,
+                        divisions: (_currentYear - _minimumYear).toInt(),
+                        labels: RangeLabels(
+                          _yearRange.start.toInt().toString(),
+                          _yearRange.end.toInt().toString(),
+                        ),
                         activeColor: context.appColors.accentPurple,
                         inactiveColor: context.appColors.cardBorder,
-                        onChanged: (v) => setState(() => _yearMin = v),
+                        onChanged: (v) => setState(() => _yearRange = v),
                       ),
                     ),
 
@@ -511,6 +531,14 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
+  String _formatNumber(double value) => value
+      .round()
+      .toString()
+      .replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (match) => '${match[1]} ',
+      );
+
   Widget _costField(
     String label,
     TextEditingController controller,
@@ -577,14 +605,18 @@ class _SearchScreenState extends State<SearchScreen>
             children: [
               Icon(icon, color: context.appColors.textSecondary, size: 18),
               SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: context.appColors.textSecondary,
-                  fontSize: 14,
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 14,
+                  ),
                 ),
               ),
-              Spacer(),
+              SizedBox(width: 8),
               Text(
                 value,
                 style: GoogleFonts.outfit(
