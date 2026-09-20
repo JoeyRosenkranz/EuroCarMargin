@@ -427,7 +427,11 @@ class LeBonCoinPriceResult {
       .replaceAll(RegExp(r'[^a-z0-9]'), '');
 
   static String _fuelFamily(String? value) {
-    final text = (value ?? '').toLowerCase();
+    final text = (value ?? '')
+        .toLowerCase()
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ê', 'e');
     if (text.contains('plug') ||
         text.contains('phev') ||
         text.contains('rechargeable')) {
