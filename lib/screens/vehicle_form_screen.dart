@@ -673,16 +673,19 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                               ),
                             ]),
                             SizedBox(height: 8),
-                            SwitchListTile.adaptive(
-                              contentPadding: EdgeInsets.zero,
-                              value: _familyBenefit,
-                              onChanged: (value) =>
-                                  setState(() => _familyBenefit = value),
-                              title: Text(
-                                'Famille avec 3 enfants à charge',
-                              ),
-                              subtitle: Text(
-                                'Véhicule 5 places minimum · remboursement après paiement · 1 véhicule / 2 ans',
+                            Material(
+                              color: Colors.transparent,
+                              child: SwitchListTile.adaptive(
+                                contentPadding: EdgeInsets.zero,
+                                value: _familyBenefit,
+                                onChanged: (value) =>
+                                    setState(() => _familyBenefit = value),
+                                title: Text(
+                                  'Famille avec 3 enfants à charge',
+                                ),
+                                subtitle: Text(
+                                  'Véhicule 5 places minimum · remboursement après paiement · 1 véhicule / 2 ans',
+                                ),
                               ),
                             ),
                           ],
@@ -736,14 +739,17 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                               hint: '1500',
                             ),
                             SizedBox(height: 8),
-                            SwitchListTile.adaptive(
-                              contentPadding: EdgeInsets.zero,
-                              value: _vatOnMargin,
-                              onChanged: (value) =>
-                                  setState(() => _vatOnMargin = value),
-                              title: Text('Régime de TVA sur marge'),
-                              subtitle: Text(
-                                'À activer uniquement si la facture d’achat rend ce régime éligible.',
+                            Material(
+                              color: Colors.transparent,
+                              child: SwitchListTile.adaptive(
+                                contentPadding: EdgeInsets.zero,
+                                value: _vatOnMargin,
+                                onChanged: (value) =>
+                                    setState(() => _vatOnMargin = value),
+                                title: Text('Régime de TVA sur marge'),
+                                subtitle: Text(
+                                  'À activer uniquement si la facture d’achat rend ce régime éligible.',
+                                ),
                               ),
                             ),
                           ],

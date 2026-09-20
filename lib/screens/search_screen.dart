@@ -385,14 +385,17 @@ class _SearchScreenState extends State<SearchScreen>
                             _proCostsCtrl,
                             Icons.business_center_outlined,
                           ),
-                          SwitchListTile.adaptive(
-                            value: _vatOnMargin,
-                            contentPadding: EdgeInsets.zero,
-                            onChanged: (value) =>
-                                setState(() => _vatOnMargin = value),
-                            title: Text('TVA sur marge'),
-                            subtitle: Text(
-                              'Hypothèse prudente, à confirmer selon la facture du vendeur.',
+                          Material(
+                            color: Colors.transparent,
+                            child: SwitchListTile.adaptive(
+                              value: _vatOnMargin,
+                              contentPadding: EdgeInsets.zero,
+                              onChanged: (value) =>
+                                  setState(() => _vatOnMargin = value),
+                              title: Text('TVA sur marge'),
+                              subtitle: Text(
+                                'Hypothèse prudente, à confirmer selon la facture du vendeur.',
+                              ),
                             ),
                           ),
                         ],
