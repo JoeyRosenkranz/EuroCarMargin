@@ -246,7 +246,19 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${r.vehicle.brand} ${r.vehicle.model}'),
+        centerTitle: true,
+        scrolledUnderElevation: 0,
+        title: Image.asset(
+          'assets/logo2.png',
+          width: 54,
+          height: 54,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, _, _) => Icon(
+            Icons.speed_rounded,
+            color: context.appColors.accent,
+          ),
+        ),
         actions: [
           IconButton(
             icon: _saving
@@ -267,15 +279,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           return ListView(
             padding: EdgeInsets.all(16),
             children: [
-              Center(
-                child: Image.asset(
-                  'assets/logo2.png',
-                  height: 60,
-                  fit: BoxFit.contain,
-                  errorBuilder: (ctx, err, stack) => SizedBox(),
-                ),
-              ),
-              SizedBox(height: 16),
               // --- Vehicle Image ---
               if (widget.imageUrl != null) _buildVehicleImage(),
               if (widget.imageUrl != null) SizedBox(height: 16),
@@ -1032,6 +1035,25 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildMoneyField(
+    String label,
+    TextEditingController controller, {
+    double width = 120,
+  }) {
+    return SizedBox(
+      width: width,
+      child: TextField(
+        controller: controller,
+        keyboardType: TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: label,
+          suffixText: '€',
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
   Widget _buildVehicleIdentityCard() {
     final mileage = r.vehicle.mileage == null
         ? 'Kilométrage à vérifier'
@@ -1100,25 +1122,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildMoneyField(
-    String label,
-    TextEditingController controller, {
-    double width = 120,
-  }) {
-    return SizedBox(
-      width: width,
-      child: TextField(
-        controller: controller,
-        keyboardType: TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          labelText: label,
-          suffixText: '€',
-          isDense: true,
-        ),
       ),
     );
   }
