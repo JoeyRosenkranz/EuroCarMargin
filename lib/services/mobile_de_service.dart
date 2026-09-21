@@ -118,7 +118,10 @@ class MobileDeService {
 
       final powerKW = int.tryParse(power?.group(1) ?? '');
       return listing.copyWith(
-        mileage: _number(text, r'(\d[\d.\s]{1,10})\s*km'),
+        mileage: _number(
+          text,
+          r'(\d{1,3}(?:[.\s]\d{3}){1,2}|\d{1,6})\s*km',
+        ),
         year: int.tryParse(registration?.group(2) ?? ''),
         firstRegistrationMonth:
             int.tryParse(registration?.group(1) ?? ''),
@@ -214,7 +217,10 @@ class MobileDeService {
           model: model,
           price: price,
           priceFormatted: '${price.round()} €',
-          mileage: _number(text, r'(\d[\d.\s]{1,10})\s*km'),
+          mileage: _number(
+            text,
+            r'(\d{1,3}(?:[.\s]\d{3}){1,2}|\d{1,6})\s*km',
+          ),
           year: int.tryParse(registration?.group(2) ?? ''),
           firstRegistrationMonth:
               int.tryParse(registration?.group(1) ?? ''),
