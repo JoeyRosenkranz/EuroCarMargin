@@ -8,6 +8,7 @@ import '../services/autoscout_service.dart';
 import '../services/tax_calculator.dart';
 import '../services/vehicle_specs_resolver.dart';
 import '../theme/app_theme.dart';
+import '../widgets/brand_header.dart';
 import 'dashboard_screen.dart';
 
 class VehicleFormScreen extends StatefulWidget {
@@ -337,30 +338,8 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
         opacity: _fadeAnim,
         child: CustomScrollView(
           slivers: [
-            // --- App Bar
-            SliverAppBar(
-              expandedHeight: 120,
-              floating: true,
-              pinned: true,
-              backgroundColor: context.appColors.surface,
-              flexibleSpace: FlexibleSpaceBar(
-                title: Text(
-                  'Nouvelle Recherche',
-                  style: GoogleFonts.outfit(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                background: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [context.appColors.gradientStart, context.appColors.surface],
-                    ),
-                  ),
-                ),
-              ),
+            const BrandSliverHeader(
+              caption: 'SIMULATEUR LIBRE  •  COÛT COMPLET D’IMPORTATION',
             ),
 
             // --- Body
@@ -372,6 +351,8 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _buildModeIntro(),
+                      SizedBox(height: 24),
                       // === SECTION: Véhicule ===
                       _sectionHeader(
                         Icons.directions_car_rounded,
@@ -414,27 +395,38 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                                     ),
                                     dropdownColor: context.appColors.surfaceLight,
                                     isExpanded: true,
+                                    isDense: true,
+                                    icon: Padding(
+                                      padding: EdgeInsets.only(right: 4),
+                                      child: Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                      ),
+                                    ),
                                     menuMaxHeight: 400,
+                                    selectedItemBuilder: (context) => [
+                                      ...sortedBrands.map(
+                                        (brand) =>
+                                            compactDropdownText(context, brand),
+                                      ),
+                                      compactDropdownText(
+                                        context,
+                                        'Autre marque',
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ],
                                     items: [
                                       ...sortedBrands.map(
                                         (b) => DropdownMenuItem(
                                           value: b,
-                                          child: Text(
-                                            b,
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                            ),
-                                          ),
+                                          child: compactDropdownText(context, b),
                                         ),
                                       ),
                                       DropdownMenuItem(
                                         value: '__custom__',
-                                        child: Text(
-                                          '✏️ Autre marque...',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontStyle: FontStyle.italic,
-                                          ),
+                                        child: compactDropdownText(
+                                          context,
+                                          'Autre marque…',
+                                          fontStyle: FontStyle.italic,
                                         ),
                                       ),
                                     ],
@@ -498,27 +490,38 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                                     ),
                                     dropdownColor: context.appColors.surfaceLight,
                                     isExpanded: true,
+                                    isDense: true,
+                                    icon: Padding(
+                                      padding: EdgeInsets.only(right: 4),
+                                      child: Icon(
+                                        Icons.keyboard_arrow_down_rounded,
+                                      ),
+                                    ),
                                     menuMaxHeight: 400,
+                                    selectedItemBuilder: (context) => [
+                                      ..._availableModels.map(
+                                        (model) =>
+                                            compactDropdownText(context, model),
+                                      ),
+                                      compactDropdownText(
+                                        context,
+                                        'Autre modèle',
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ],
                                     items: [
                                       ..._availableModels.map(
                                         (m) => DropdownMenuItem(
                                           value: m,
-                                          child: Text(
-                                            m,
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                            ),
-                                          ),
+                                          child: compactDropdownText(context, m),
                                         ),
                                       ),
                                       DropdownMenuItem(
                                         value: '__custom__',
-                                        child: Text(
-                                          '✏️ Autre modèle...',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontStyle: FontStyle.italic,
-                                          ),
+                                        child: compactDropdownText(
+                                          context,
+                                          'Autre modèle…',
+                                          fontStyle: FontStyle.italic,
                                         ),
                                       ),
                                     ],
@@ -583,6 +586,26 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                                 ),
                               ),
                               dropdownColor: context.appColors.surfaceLight,
+                              isExpanded: true,
+                              isDense: true,
+                              icon: Padding(
+                                padding: EdgeInsets.only(right: 4),
+                                child: Icon(Icons.keyboard_arrow_down_rounded),
+                              ),
+                              selectedItemBuilder: (context) => [
+                                'Essence',
+                                'Diesel',
+                                'Hybride',
+                                'Hybride rechargeable (PHEV)',
+                                'E85',
+                                'Électrique',
+                                'Hydrogène',
+                              ]
+                                  .map(
+                                    (fuel) =>
+                                        compactDropdownText(context, fuel),
+                                  )
+                                  .toList(),
                               items:
                                   [
                                         'Essence',
@@ -596,7 +619,10 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                                       .map(
                                         (fuel) => DropdownMenuItem(
                                           value: fuel,
-                                          child: Text(fuel),
+                                          child: compactDropdownText(
+                                            context,
+                                            fuel,
+                                          ),
                                         ),
                                       )
                                       .toList(),
@@ -769,13 +795,25 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
                             prefixIcon: Icon(Icons.location_on),
                           ),
                           dropdownColor: context.appColors.surfaceLight,
+                          isExpanded: true,
+                          isDense: true,
+                          icon: Padding(
+                            padding: EdgeInsets.only(right: 4),
+                            child: Icon(Icons.keyboard_arrow_down_rounded),
+                          ),
+                          selectedItemBuilder: (context) => regionalTaxPerCV.keys
+                              .map(
+                                (region) =>
+                                    compactDropdownText(context, region),
+                              )
+                              .toList(),
                           items: regionalTaxPerCV.keys.map((r) {
                             final price = regionalTaxPerCV[r]!;
                             return DropdownMenuItem(
                               value: r,
-                              child: Text(
+                              child: compactDropdownText(
+                                context,
                                 '$r — ${price.toStringAsFixed(2)} €/CV',
-                                style: TextStyle(fontSize: 14),
                               ),
                             );
                           }).toList(),
@@ -841,14 +879,71 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
 
   // --- Helper widgets ---
 
+  Widget _buildModeIntro() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: context.appColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: context.appColors.cardBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  context.appColors.gradientStart,
+                  context.appColors.gradientEnd,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.tune_rounded, color: Colors.white, size: 23),
+          ),
+          SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Simulation sur mesure',
+                  style: GoogleFonts.outfit(
+                    color: context.appColors.textPrimary,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: 5),
+                Text(
+                  'Renseignez un véhicule précis. Les données techniques disponibles seront complétées automatiquement.',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _sectionHeader(IconData icon, String title) {
     return Row(
       children: [
         Container(
-          padding: EdgeInsets.all(8),
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
-            color: context.appColors.accent.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(10),
+            color: context.appColors.accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(11),
           ),
           child: Icon(icon, color: context.appColors.accent, size: 20),
         ),
@@ -857,7 +952,7 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
           title,
           style: GoogleFonts.outfit(
             fontSize: 18,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             color: context.appColors.textPrimary,
           ),
         ),
@@ -870,13 +965,13 @@ class _VehicleFormScreenState extends State<VehicleFormScreen>
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: context.appColors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: context.appColors.cardBorder),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 12,
-            offset: Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 22,
+            offset: Offset(0, 8),
           ),
         ],
       ),

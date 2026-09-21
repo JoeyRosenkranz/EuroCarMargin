@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../data/car_brands_data.dart';
 import '../theme/app_theme.dart';
 import '../services/autoscout_service.dart';
+import '../widgets/brand_header.dart';
 import 'results_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -158,64 +159,15 @@ class _SearchScreenState extends State<SearchScreen>
         opacity: CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut),
         child: CustomScrollView(
           slivers: [
-            SliverAppBar(
-              expandedHeight: 124,
-              floating: true,
-              pinned: true,
-              centerTitle: false,
-              backgroundColor: context.appColors.surface,
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: EdgeInsetsDirectional.only(
-                  start: 16,
-                  bottom: 14,
-                  end: 16,
-                ),
-                title: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Image.asset(
-                      'assets/logo2.png',
-                      width: 42,
-                      height: 42,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => Icon(
-                        Icons.directions_car_rounded,
-                        color: context.appColors.accent,
-                      ),
-                    ),
-                    SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'EuroCar Margin',
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.outfit(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                background: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        context.appColors.gradientStart,
-                        context.appColors.surface,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            const BrandSliverHeader(),
             SliverPadding(
               padding: EdgeInsets.all(16),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _buildSearchIntro(),
+                    SizedBox(height: 24),
                     // --- Marque ---
                     _sectionLabel('Marque'),
                     SizedBox(height: 8),
@@ -226,13 +178,25 @@ class _SearchScreenState extends State<SearchScreen>
                           prefixIcon: Icon(Icons.directions_car),
                           border: InputBorder.none,
                           hintText: 'Choisir une marque',
+                          filled: false,
                         ),
                         dropdownColor: context.appColors.surfaceLight,
                         isExpanded: true,
+                        isDense: true,
+                        icon: Padding(
+                          padding: EdgeInsets.only(right: 8),
+                          child: Icon(Icons.keyboard_arrow_down_rounded),
+                        ),
                         menuMaxHeight: 400,
+                        selectedItemBuilder: (context) => sortedBrands
+                            .map((brand) => compactDropdownText(context, brand))
+                            .toList(),
                         items: sortedBrands
                             .map(
-                              (b) => DropdownMenuItem(value: b, child: Text(b)),
+                              (b) => DropdownMenuItem(
+                                value: b,
+                                child: compactDropdownText(context, b),
+                              ),
                             )
                             .toList(),
                         onChanged: (v) {
@@ -277,24 +241,40 @@ class _SearchScreenState extends State<SearchScreen>
                                 prefixIcon: Icon(Icons.model_training),
                                 border: InputBorder.none,
                                 hintText: 'Choisir un modèle',
+                                filled: false,
                               ),
                               dropdownColor: context.appColors.surfaceLight,
                               isExpanded: true,
+                              isDense: true,
+                              icon: Padding(
+                                padding: EdgeInsets.only(right: 8),
+                                child: Icon(Icons.keyboard_arrow_down_rounded),
+                              ),
                               menuMaxHeight: 400,
+                              selectedItemBuilder: (context) => [
+                                ..._availableModels.map(
+                                  (model) =>
+                                      compactDropdownText(context, model),
+                                ),
+                                compactDropdownText(
+                                  context,
+                                  'Autre modèle',
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ],
                               items: [
                                 ..._availableModels.map(
                                   (m) => DropdownMenuItem(
                                     value: m,
-                                    child: Text(m),
+                                    child: compactDropdownText(context, m),
                                   ),
                                 ),
                                 DropdownMenuItem(
                                   value: '__custom__',
-                                  child: Text(
-                                    '✏️ Autre modèle...',
-                                    style: TextStyle(
-                                      fontStyle: FontStyle.italic,
-                                    ),
+                                  child: compactDropdownText(
+                                    context,
+                                    'Autre modèle…',
+                                    fontStyle: FontStyle.italic,
                                   ),
                                 ),
                               ],
@@ -520,6 +500,114 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
+  Widget _buildSearchIntro() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: context.appColors.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: context.appColors.cardBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .12),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -8,
+            top: -14,
+            child: Icon(
+              Icons.speed_rounded,
+              size: 88,
+              color: context.appColors.accent.withValues(alpha: .08),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: context.appColors.accentOrange.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  'MARCHÉ ALLEMAND',
+                  style: GoogleFonts.outfit(
+                    color: context.appColors.accentOrange,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ),
+              SizedBox(height: 14),
+              Text(
+                'Repérez les véhicules\nrentables en France.',
+                style: GoogleFonts.outfit(
+                  color: context.appColors.textPrimary,
+                  fontSize: 25,
+                  height: 1.08,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Prix réel, fiscalité et marché français dans une seule analyse.',
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _introChip(Icons.euro_rounded, 'Coût net'),
+                  _introChip(Icons.verified_outlined, 'Données vérifiées'),
+                  _introChip(Icons.compare_arrows_rounded, 'DE → FR'),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _introChip(IconData icon, String label) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: context.appColors.surfaceLight,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: context.appColors.cardBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: context.appColors.accent),
+          SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _sectionLabel(String text) {
     return Text(
       text,
@@ -576,10 +664,10 @@ class _SearchScreenState extends State<SearchScreen>
 
   Widget _glassCard({required Widget child}) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 4),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: context.appColors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: context.appColors.cardBorder),
       ),
       child: child,
@@ -596,15 +684,30 @@ class _SearchScreenState extends State<SearchScreen>
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: context.appColors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: context.appColors.cardBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .07),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         children: [
           Row(
             children: [
-              Icon(icon, color: context.appColors.textSecondary, size: 18),
-              SizedBox(width: 8),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: context.appColors.accent.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: context.appColors.accent, size: 17),
+              ),
+              SizedBox(width: 10),
               Expanded(
                 child: Text(
                   label,

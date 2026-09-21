@@ -70,18 +70,23 @@ class _MainShellState extends State<MainShell> {
     final themeController = context.watch<ThemeController>();
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: pages),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: context.appColors.cardBorder, width: 1),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+        child: Material(
+          color: context.appColors.surface,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: BorderSide(color: context.appColors.cardBorder),
           ),
-        ),
-        child: SafeArea(
-          top: false,
+          elevation: 10,
+          shadowColor: Colors.black.withValues(alpha: .28),
           child: Row(
             children: [
               Expanded(
                 child: NavigationBar(
+                  backgroundColor: Colors.transparent,
                   selectedIndex: _currentIndex,
                   onDestinationSelected: (i) {
                     setState(() {
@@ -91,24 +96,31 @@ class _MainShellState extends State<MainShell> {
                   },
                   destinations: const [
                     NavigationDestination(
-                      icon: Icon(Icons.search_rounded),
+                      icon: Icon(Icons.travel_explore_outlined),
+                      selectedIcon: Icon(Icons.travel_explore_rounded),
                       label: 'Marché',
                     ),
                     NavigationDestination(
-                      icon: Icon(Icons.calculate_outlined),
-                      selectedIcon: Icon(Icons.calculate_rounded),
+                      icon: Icon(Icons.speed_outlined),
+                      selectedIcon: Icon(Icons.speed_rounded),
                       label: 'Simulateur',
                     ),
                     NavigationDestination(
-                      icon: Icon(Icons.history_rounded),
+                      icon: Icon(Icons.bookmark_outline_rounded),
+                      selectedIcon: Icon(Icons.bookmark_rounded),
                       label: 'Dossiers',
                     ),
                   ],
                 ),
               ),
+              Container(
+                width: 1,
+                height: 34,
+                color: context.appColors.cardBorder,
+              ),
               Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: IconButton.filledTonal(
+                padding: const EdgeInsets.symmetric(horizontal: 7),
+                child: IconButton(
                   onPressed: themeController.toggle,
                   tooltip: themeController.isDark
                       ? 'Passer au thème clair'
@@ -117,6 +129,7 @@ class _MainShellState extends State<MainShell> {
                     themeController.isDark
                         ? Icons.light_mode_rounded
                         : Icons.dark_mode_rounded,
+                    color: context.appColors.accentOrange,
                   ),
                 ),
               ),

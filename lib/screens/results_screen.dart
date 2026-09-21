@@ -290,11 +290,18 @@ class _ResultsScreenState extends State<ResultsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          '${widget.brand} ${widget.model}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+        centerTitle: true,
+        scrolledUnderElevation: 0,
+        title: Image.asset(
+          'assets/logo2.png',
+          width: 54,
+          height: 54,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, _, _) => Icon(
+            Icons.speed_rounded,
+            color: context.appColors.accent,
+          ),
         ),
         actions: [
           // Région picker
@@ -332,11 +339,29 @@ class _ResultsScreenState extends State<ResultsScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: Size.fromHeight(96),
+          preferredSize: Size.fromHeight(120),
           child: Container(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: context.appColors.cardBorder),
+              ),
+            ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  '${widget.brand} ${widget.model}'.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.outfit(
+                    color: context.appColors.textPrimary,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
@@ -376,7 +401,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         ),
       ),
       body: ListView.builder(
-        padding: EdgeInsets.all(12),
+        padding: EdgeInsets.fromLTRB(12, 16, 12, 24),
         itemCount: _listings.length,
         itemBuilder: (context, i) => _buildListingCard(_listings[i], i),
       ),
@@ -410,13 +435,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
         child: Container(
           decoration: BoxDecoration(
             color: context.appColors.surface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(22),
             border: Border.all(color: context.appColors.cardBorder),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 8,
-                offset: Offset(0, 2),
+                color: Colors.black.withValues(alpha: 0.14),
+                blurRadius: 22,
+                offset: Offset(0, 9),
               ),
             ],
           ),
@@ -426,7 +451,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               // --- Image ---
               ClipRRect(
                 borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(16),
+                  top: Radius.circular(22),
                 ),
                 child: listing.imageUrls.isNotEmpty
                     ? SizedBox(

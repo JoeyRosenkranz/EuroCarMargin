@@ -99,7 +99,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Historique', style: GoogleFonts.outfit()),
+        centerTitle: true,
+        scrolledUnderElevation: 0,
+        title: Image.asset(
+          'assets/logo2.png',
+          width: 54,
+          height: 54,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, _, _) => Icon(
+            Icons.speed_rounded,
+            color: context.appColors.accent,
+          ),
+        ),
         actions: [
           if (_searches.isNotEmpty)
             IconButton(
@@ -111,6 +123,46 @@ class _HistoryScreenState extends State<HistoryScreen> {
               tooltip: 'Tout supprimer',
             ),
         ],
+        bottom: PreferredSize(
+          preferredSize: Size.fromHeight(56),
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: context.appColors.cardBorder),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Dossiers sauvegardés',
+                    style: GoogleFonts.outfit(
+                      color: context.appColors.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: context.appColors.accent.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Text(
+                    '${_searches.length}',
+                    style: TextStyle(
+                      color: context.appColors.accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       body: _loading
           ? Center(child: CircularProgressIndicator())

@@ -1,30 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Couleurs du thème "Dashboard Pro"
+/// Palette automobile premium : acier, bleu performance et orange signal.
 class AppColors {
   // Fonds
-  static const background = Color(0xFF071019);
-  static const surface = Color(0xFF0E1A25);
-  static const surfaceLight = Color(0xFF152534);
-  static const cardBorder = Color(0xFF22394A);
+  static const background = Color(0xFF080B10);
+  static const surface = Color(0xFF11161D);
+  static const surfaceLight = Color(0xFF1A212A);
+  static const cardBorder = Color(0xFF2B3541);
 
   // Accents
-  static const accent = Color(0xFF54E1C1);
-  static const accentGreen = Color(0xFF54E1A1);
-  static const accentOrange = Color(0xFFFFB454);
-  static const accentRed = Color(0xFFFF6B6B);
-  static const accentPurple = Color(0xFFA98BFF);
-  static const accentCyan = Color(0xFF62C7FF);
+  static const accent = Color(0xFF3D8BFF);
+  static const accentGreen = Color(0xFF36C978);
+  static const accentOrange = Color(0xFFFF9D2E);
+  static const accentRed = Color(0xFFFF5D68);
+  static const accentPurple = Color(0xFF7C8DFF);
+  static const accentCyan = Color(0xFF55B8FF);
 
   // Texte
   static const textPrimary = Color(0xFFF3F8FB);
-  static const textSecondary = Color(0xFFA8BAC8);
-  static const textMuted = Color(0xFF667C8D);
+  static const textSecondary = Color(0xFFAAB5C3);
+  static const textMuted = Color(0xFF6D7B8C);
 
   // Gradients
-  static const gradientStart = Color(0xFF137F8A);
-  static const gradientEnd = Color(0xFF54E1C1);
+  static const gradientStart = Color(0xFF154EA8);
+  static const gradientEnd = Color(0xFF3D8BFF);
 
   // Risk badges
   static Color riskColor(String level) {
@@ -47,17 +47,17 @@ class AppLightColors {
   static const surface = Color(0xFFF7F3EC);
   static const surfaceLight = Color(0xFFE3DED4);
   static const cardBorder = Color(0xFFCFC8BC);
-  static const accent = Color(0xFF087A70);
+  static const accent = Color(0xFF155EEF);
   static const accentGreen = Color(0xFF147D53);
-  static const accentOrange = Color(0xFF9B5A00);
+  static const accentOrange = Color(0xFFB85C00);
   static const accentRed = Color(0xFFB4232D);
-  static const accentPurple = Color(0xFF6246B4);
-  static const accentCyan = Color(0xFF006A91);
+  static const accentPurple = Color(0xFF5267D8);
+  static const accentCyan = Color(0xFF086E9D);
   static const textPrimary = Color(0xFF101C24);
   static const textSecondary = Color(0xFF465B68);
   static const textMuted = Color(0xFF70838E);
-  static const gradientStart = Color(0xFFCFE5DD);
-  static const gradientEnd = Color(0xFFAED4C8);
+  static const gradientStart = Color(0xFF164FA4);
+  static const gradientEnd = Color(0xFF3478DC);
 }
 
 class AdaptiveAppColors {
@@ -186,7 +186,7 @@ class AppTheme {
         color: surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: border, width: 1),
         ),
       ),
@@ -194,23 +194,23 @@ class AppTheme {
         filled: true,
         fillColor: surfaceLight,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: primary, width: 2),
         ),
         labelStyle: TextStyle(color: textSecondary),
         hintStyle: TextStyle(color: textMuted),
         prefixIconColor: textSecondary,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
+          horizontal: 14,
+          vertical: 16,
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -221,7 +221,7 @@ class AppTheme {
               : Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
           textStyle: GoogleFonts.outfit(
             fontSize: 16,
@@ -243,7 +243,7 @@ class AppTheme {
         elevation: 8,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 72,
+        height: 66,
         backgroundColor: surface,
         indicatorColor: primary.withValues(alpha: .16),
         iconTheme: WidgetStateProperty.resolveWith(
@@ -272,6 +272,14 @@ class AppTheme {
         behavior: SnackBarBehavior.floating,
       ),
       dividerColor: border,
+      sliderTheme: SliderThemeData(
+        activeTrackColor: primary,
+        inactiveTrackColor: border,
+        thumbColor: primary,
+        overlayColor: primary.withValues(alpha: .12),
+        trackHeight: 3,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+      ),
     );
   }
 }
