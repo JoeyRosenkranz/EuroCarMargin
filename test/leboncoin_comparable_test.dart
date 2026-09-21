@@ -94,4 +94,33 @@ void main() {
 
     expect(comparable.count, 0);
   });
+
+  test('propose un prix indicatif année ±1 quand le strict est insuffisant', () {
+    final result = LeBonCoinPriceResult(
+      quick: 0,
+      market: 0,
+      premium: 0,
+      count: 2,
+      listings: [
+        ad('Audi RS3 Sportback quattro', 2021, 62000, 'Essence', 49500),
+        ad('Audi RS3 Sportback quattro', 2023, 48000, 'Essence', 55000),
+      ],
+    );
+
+    final comparable = result.comparableFor(
+      target(
+        title: 'Audi RS3 Sportback quattro',
+        brand: 'Audi',
+        model: 'RS3',
+        year: 2022,
+        fuel: 'Benzin',
+        mileage: 55000,
+      ),
+    );
+
+    expect(comparable.hasEstimate, isTrue);
+    expect(comparable.approximate, isTrue);
+    expect(comparable.isReliable, isFalse);
+    expect(comparable.market, 52250);
+  });
 }

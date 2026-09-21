@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../models/car_listing.dart';
 import '../models/calculation_result.dart';
 import '../services/database_helper.dart';
+import '../services/french_market_service.dart';
 import '../services/leboncoin_service.dart';
 import '../services/tax_calculator.dart';
 import '../theme/app_theme.dart';
@@ -30,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _saved = false;
   bool _saving = false;
   bool _editingTechnical = false;
+  bool _updatingControllers = false;
   final _fmt = NumberFormat.currency(locale: 'fr_FR', symbol: '€');
 
   LeBonCoinListing? _frenchAd;
@@ -74,6 +76,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     _proCostsController = TextEditingController(
       text: _res.proCosts.toStringAsFixed(0),
     );
+    for (final controller in _calculationControllers) {
+      controller.addListener(_onCalculationInputChanged);
+    }
 
     _animCtrl = AnimationController(
       vsync: this,
@@ -84,6 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   void _recalculate() {
+    if (_updatingControllers || !mounted) return;
     final v = _res.vehicle;
     final newCV = int.tryParse(_cvController.text) ?? 0;
     final newCO2 = int.tryParse(_co2Controller.text) ?? 0;
@@ -124,14 +130,27 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  List<TextEditingController> get _calculationControllers => [
+    _cvController,
+    _co2Controller,
+    _weightController,
+    _transportController,
+    _prepController,
+    _marketController,
+    _proCostsController,
+  ];
+
+  void _onCalculationInputChanged() => _recalculate();
+
   Future<void> _fetchComparableFrenchAd() async {
-    final service = LeBonCoinService();
+    final service = FrenchMarketService();
     try {
       final result = await service.fetchPrices(
         brand: r.vehicle.brand,
         model: r.vehicle.model,
-        yearFrom: r.vehicle.year,
-        yearTo: r.vehicle.year, // Try matching exact year first
+        yearFrom: r.vehicle.year - 1,
+        yearTo: r.vehicle.year + 1,
+        mileage: r.vehicle.mileage,
       );
       final comparable = result.comparableFor(
         CarListing(
@@ -149,7 +168,23 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       );
       if (mounted) {
+        var refreshed = _res;
+        if (comparable.hasEstimate) {
+          refreshed = TaxCalculator().calculate(
+            _res.vehicle,
+            childrenCount: (_res.familyCO2Deduction > 0) ? 3 : 0,
+            lbcMarketPrice: comparable.market,
+            lbcQuickPrice: comparable.quick,
+            comparableCount: comparable.count,
+            proCosts: _res.proCosts,
+            vatOnMargin: _res.vatOnMargin,
+          );
+          _updatingControllers = true;
+          _marketController.text = comparable.market.toStringAsFixed(0);
+          _updatingControllers = false;
+        }
         setState(() {
+          _res = refreshed;
           if (comparable.listings.isNotEmpty) {
             _frenchAd = comparable.listings.first;
           }
@@ -166,6 +201,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _animCtrl.dispose();
+    for (final controller in _calculationControllers) {
+      controller.removeListener(_onCalculationInputChanged);
+    }
     _cvController.dispose();
     _co2Controller.dispose();
     _weightController.dispose();
@@ -208,19 +246,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        centerTitle: true,
-        scrolledUnderElevation: 0,
-        title: Image.asset(
-          'assets/logo2.png',
-          width: 54,
-          height: 54,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.high,
-          errorBuilder: (_, _, _) => Icon(
-            Icons.speed_rounded,
-            color: context.appColors.accent,
-          ),
-        ),
+        title: Text('${r.vehicle.brand} ${r.vehicle.model}'),
         actions: [
           IconButton(
             icon: _saving
@@ -241,9 +267,20 @@ class _DashboardScreenState extends State<DashboardScreen>
           return ListView(
             padding: EdgeInsets.all(16),
             children: [
+              Center(
+                child: Image.asset(
+                  'assets/logo2.png',
+                  height: 60,
+                  fit: BoxFit.contain,
+                  errorBuilder: (ctx, err, stack) => SizedBox(),
+                ),
+              ),
+              SizedBox(height: 16),
               // --- Vehicle Image ---
               if (widget.imageUrl != null) _buildVehicleImage(),
               if (widget.imageUrl != null) SizedBox(height: 16),
+              _buildVehicleIdentityCard(),
+              SizedBox(height: 16),
 
               // --- Risk Badge ---
               _buildRiskBadge(),
@@ -995,6 +1032,78 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildVehicleIdentityCard() {
+    final mileage = r.vehicle.mileage == null
+        ? 'Kilométrage à vérifier'
+        : '${NumberFormat.decimalPattern('fr_FR').format(r.vehicle.mileage)} km';
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.appColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: context.appColors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${r.vehicle.brand} ${r.vehicle.model} ${r.vehicle.trim}'.trim(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.outfit(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: context.appColors.textPrimary,
+            ),
+          ),
+          SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _vehicleMetaChip(
+                Icons.calendar_month_rounded,
+                'Année ${r.vehicle.year}',
+              ),
+              _vehicleMetaChip(Icons.speed_rounded, mileage),
+              if ((r.vehicle.fuelType ?? '').isNotEmpty)
+                _vehicleMetaChip(
+                  Icons.local_gas_station_rounded,
+                  r.vehicle.fuelType!,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _vehicleMetaChip(IconData icon, String label) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: context.appColors.surfaceLight,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: context.appColors.accent),
+          SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMoneyField(
     String label,
     TextEditingController controller, {
@@ -1004,7 +1113,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       width: width,
       child: TextField(
         controller: controller,
-        onChanged: (_) => _recalculate(),
         keyboardType: TextInputType.numberWithOptions(decimal: true),
         decoration: InputDecoration(
           labelText: label,
@@ -1067,7 +1175,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
               SizedBox(width: 8),
               Text(
-                'Annonce similaire en France',
+                'Annonce similaire en France · ${_frenchAd!.source}',
                 style: GoogleFonts.outfit(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -1301,7 +1409,6 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: TextField(
             controller: controller,
             keyboardType: TextInputType.number,
-            onChanged: (_) => _recalculate(),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: isMissing ? Colors.red : context.appColors.accent,

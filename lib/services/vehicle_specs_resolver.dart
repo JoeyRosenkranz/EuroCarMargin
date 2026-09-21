@@ -33,7 +33,9 @@ class VehicleSpecsResolver {
       weightG1: weight,
       seats: seats,
       electricRangeKm: range,
-      technicalSource: 'Consensus moteur (${peers.length} annonces)',
+      technicalSource:
+          'Consensus moteur (${peers.length} annonces · '
+          '${peers.map((peer) => peer.marketplace).toSet().length} source(s))',
     );
   }
 
@@ -42,11 +44,19 @@ class VehicleSpecsResolver {
   /// identifiable dans le titre.
   bool matchesTechnicalVariant(CarListing target, CarListing candidate) {
     if (candidate.id == target.id) return false;
-    if (target.year == null || target.powerKW == null) return false;
+    if (target.year == null ||
+        (target.powerKW == null && target.powerPS == null)) {
+      return false;
+    }
+    final samePower = target.powerKW != null && candidate.powerKW != null
+        ? candidate.powerKW == target.powerKW
+        : target.powerPS != null && candidate.powerPS != null
+        ? (candidate.powerPS! - target.powerPS!).abs() <= 2
+        : false;
     if (_normalize(candidate.brand) != _normalize(target.brand) ||
         _normalize(candidate.model) != _normalize(target.model) ||
         candidate.year != target.year ||
-        candidate.powerKW != target.powerKW ||
+        !samePower ||
         _fuelFamily(candidate.fuel) != _fuelFamily(target.fuel)) {
       return false;
     }

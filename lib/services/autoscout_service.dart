@@ -28,6 +28,7 @@ class AutoScoutService {
     String? fuel,
     int page = 1,
     String country = 'D', // D = Germany
+    String baseUrl = _baseUrl,
   }) {
     final slug = model != null && model.isNotEmpty
         ? '/lst/${_slugify(brand)}/${_slugify(model)}'
@@ -49,7 +50,7 @@ class AutoScoutService {
     if (page > 1) params['page'] = page.toString();
 
     final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');
-    return '$_baseUrl$slug?$query';
+    return '$baseUrl$slug?$query';
   }
 
   /// Rechercher des véhicules sur AutoScout24.de
@@ -63,6 +64,55 @@ class AutoScoutService {
     int? kmTo,
     String? fuel,
     int page = 1,
+  }) => _searchListingsAt(
+    brand: brand,
+    model: model,
+    priceFrom: priceFrom,
+    priceTo: priceTo,
+    yearFrom: yearFrom,
+    yearTo: yearTo,
+    kmTo: kmTo,
+    fuel: fuel,
+    page: page,
+    country: 'D',
+    baseUrl: _baseUrl,
+    marketplace: 'AutoScout24',
+    language: 'de-DE,de;q=0.9,en;q=0.5',
+  );
+
+  /// Même moteur de recherche sur le catalogue français AutoScout24.
+  Future<List<CarListing>> searchFrenchListings({
+    required String brand,
+    String? model,
+    int? yearFrom,
+    int? yearTo,
+    int? kmTo,
+  }) => _searchListingsAt(
+    brand: brand,
+    model: model,
+    yearFrom: yearFrom,
+    yearTo: yearTo,
+    kmTo: kmTo,
+    country: 'F',
+    baseUrl: 'https://www.autoscout24.fr',
+    marketplace: 'AutoScout24 France',
+    language: 'fr-FR,fr;q=0.9,en;q=0.5',
+  );
+
+  Future<List<CarListing>> _searchListingsAt({
+    required String brand,
+    String? model,
+    int? priceFrom,
+    int? priceTo,
+    int? yearFrom,
+    int? yearTo,
+    int? kmTo,
+    String? fuel,
+    int page = 1,
+    required String country,
+    required String baseUrl,
+    required String marketplace,
+    required String language,
   }) async {
     final url = _buildSearchUrl(
       brand: brand,
@@ -74,6 +124,8 @@ class AutoScoutService {
       kmTo: kmTo,
       fuel: fuel,
       page: page,
+      country: country,
+      baseUrl: baseUrl,
     );
 
     try {
@@ -88,7 +140,7 @@ class AutoScoutService {
           'User-Agent': _userAgent,
           'Accept':
               'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'de-DE,de;q=0.9,en;q=0.5',
+          'Accept-Language': language,
           'Accept-Encoding': 'gzip, deflate',
           'Connection': 'keep-alive',
         },
@@ -98,7 +150,10 @@ class AutoScoutService {
         throw Exception('AutoScout24 returned ${response.statusCode} for $url');
       }
 
-      return _parseListingsFromHtml(response.body);
+      return _parseListingsFromHtml(
+        response.body,
+        marketplace: marketplace,
+      );
     } catch (e) {
       throw Exception('Erreur de recherche AutoScout24: $e');
     }
@@ -112,9 +167,7 @@ class AutoScoutService {
       return listing;
     }
 
-    final detailUrl = listing.detailUrl.startsWith('http')
-        ? listing.detailUrl
-        : '$_baseUrl${listing.detailUrl.startsWith('/') ? '' : '/'}${listing.detailUrl}';
+    final detailUrl = listing.absoluteDetailUrl;
     final requestUrl = kIsWeb
         ? 'https://corsproxy.io/?${Uri.encodeComponent(detailUrl)}'
         : detailUrl;
@@ -126,7 +179,9 @@ class AutoScoutService {
           'User-Agent': _userAgent,
           'Accept':
               'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'de-DE,de;q=0.9,en;q=0.5',
+          'Accept-Language': listing.marketplace.contains('France')
+              ? 'fr-FR,fr;q=0.9,en;q=0.5'
+              : 'de-DE,de;q=0.9,en;q=0.5',
         },
       );
       if (response.statusCode != 200) return listing;
@@ -198,6 +253,7 @@ class AutoScoutService {
                 0,
                 normalizedText.length > 20000 ? 20000 : normalizedText.length,
               ),
+        technicalSource: 'Fiche ${listing.marketplace}',
       );
     } catch (_) {
       return listing;
@@ -205,14 +261,17 @@ class AutoScoutService {
   }
 
   /// Parse les listings depuis le HTML (via __NEXT_DATA__)
-  List<CarListing> _parseListingsFromHtml(String html) {
+  List<CarListing> _parseListingsFromHtml(
+    String html, {
+    String marketplace = 'AutoScout24',
+  }) {
     final document = html_parser.parse(html);
 
     // Chercher le script __NEXT_DATA__
     final scriptTags = document.querySelectorAll('script#__NEXT_DATA__');
     if (scriptTags.isEmpty) {
       // Fallback: essayer de parser le HTML directement
-      return _parseListingsFromDom(document);
+      return _parseListingsFromDom(document, marketplace: marketplace);
     }
 
     final jsonStr = scriptTags.first.text;
@@ -226,7 +285,12 @@ class AutoScoutService {
     return listings
         .map((item) {
           try {
-            return CarListing.fromAutoScoutJson(item as Map<String, dynamic>);
+            return CarListing.fromAutoScoutJson(
+              item as Map<String, dynamic>,
+            ).copyWith(
+              marketplace: marketplace,
+              technicalSource: 'Annonce $marketplace',
+            );
           } catch (_) {
             return null;
           }
@@ -237,7 +301,10 @@ class AutoScoutService {
   }
 
   /// Fallback: parse les articles HTML directement
-  List<CarListing> _parseListingsFromDom(dynamic document) {
+  List<CarListing> _parseListingsFromDom(
+    dynamic document, {
+    String marketplace = 'AutoScout24',
+  }) {
     final articles = document.querySelectorAll('article');
     final listings = <CarListing>[];
 
@@ -321,6 +388,8 @@ class AutoScoutService {
             powerPS: powerPS,
             imageUrls: imgSrc.isNotEmpty ? [imgSrc] : [],
             detailUrl: href,
+            technicalSource: 'Annonce $marketplace',
+            marketplace: marketplace,
           ),
         );
       } catch (_) {
@@ -367,7 +436,10 @@ class AutoScoutService {
         return {'quick': 0, 'market': 0, 'premium': 0};
       }
 
-      final listings = _parseListingsFromHtml(response.body);
+      final listings = _parseListingsFromHtml(
+        response.body,
+        marketplace: 'AutoScout24 France',
+      );
       if (listings.isEmpty) {
         return {'quick': 0, 'market': 0, 'premium': 0};
       }

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../models/car_listing.dart';
-import '../services/autoscout_service.dart';
+import '../services/german_market_service.dart';
+import '../services/french_market_service.dart';
 import '../services/tax_calculator.dart';
 import '../services/leboncoin_service.dart';
 import '../services/vehicle_specs_resolver.dart';
@@ -45,7 +46,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
   bool _loadingPrices = true;
   late List<CarListing> _listings;
   final _loadingTechnical = <String>{};
-  final _autoScoutService = AutoScoutService();
+  final _germanMarketService = GermanMarketService();
   final _specsResolver = VehicleSpecsResolver();
 
   @override
@@ -58,7 +59,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   @override
   void dispose() {
-    _autoScoutService.dispose();
+    _germanMarketService.dispose();
     super.dispose();
   }
 
@@ -84,16 +85,16 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
     if (current.hasRequiredTechnicalData) return current;
     if (mounted) setState(() => _loadingTechnical.add(listing.id));
-    var enriched = await _autoScoutService.enrichListing(current);
+    var enriched = await _germanMarketService.enrichListing(current);
     var candidates = <CarListing>[..._listings, enriched];
     enriched = _specsResolver.resolve(enriched, candidates);
 
     if (searchExactPeers &&
         !enriched.hasRequiredTechnicalData &&
         enriched.year != null &&
-        enriched.powerKW != null) {
+        (enriched.powerKW != null || enriched.powerPS != null)) {
       try {
-        final exactResults = await _autoScoutService.searchListings(
+        final exactResults = await _germanMarketService.searchListings(
           brand: enriched.brand,
           model: enriched.model,
           yearFrom: enriched.year,
@@ -112,7 +113,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
           enrichedPeers.addAll(
             await Future.wait([
               for (var index = start; index < end; index++)
-                _autoScoutService.enrichListing(peers[index]),
+                _germanMarketService.enrichListing(peers[index]),
             ]),
           );
         }
@@ -137,8 +138,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
   }
 
   Future<void> _fetchLeBonCoinPrices() async {
+    final service = FrenchMarketService();
     try {
-      final service = LeBonCoinService();
       final result = await service.fetchPrices(
         brand: widget.brand,
         model: widget.model.isNotEmpty ? widget.model : null,
@@ -152,8 +153,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
                   .map((l) => l.year ?? DateTime.now().year)
                   .reduce((a, b) => a > b ? a : b)
             : null,
+        mileage: null,
       );
-      service.dispose();
       if (mounted) {
         setState(() {
           _lbcPrices = result;
@@ -162,6 +163,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
       }
     } catch (_) {
       if (mounted) setState(() => _loadingPrices = false);
+    } finally {
+      service.dispose();
     }
   }
 
@@ -202,15 +205,23 @@ class _ResultsScreenState extends State<ResultsScreen> {
           _lbcPrices?.comparableFor(resolvedListing) ??
           ComparableMarketEstimate.empty();
       if (!comparable.isReliable && resolvedListing.year != null) {
-        final service = LeBonCoinService();
+        final service = FrenchMarketService();
         try {
           final exactFrenchMarket = await service.fetchPrices(
             brand: resolvedListing.brand,
             model: resolvedListing.model,
-            yearFrom: resolvedListing.year,
-            yearTo: resolvedListing.year,
+            yearFrom: resolvedListing.year! - 1,
+            yearTo: resolvedListing.year! + 1,
+            mileage: resolvedListing.mileage,
           );
-          comparable = exactFrenchMarket.comparableFor(resolvedListing);
+          final exactComparable = exactFrenchMarket.comparableFor(
+            resolvedListing,
+          );
+          if (exactComparable.isReliable ||
+              (!comparable.isReliable &&
+                  exactComparable.count > comparable.count)) {
+            comparable = exactComparable;
+          }
         } catch (error) {
           debugPrint('Marché français exact indisponible: $error');
         } finally {
@@ -246,7 +257,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               ? resolvedListing.imageUrls.first
               : null,
           listingUrl: resolvedListing.detailUrl.isNotEmpty
-              ? 'https://www.autoscout24.de${resolvedListing.detailUrl}'
+              ? resolvedListing.absoluteDetailUrl
               : null,
         ),
         transitionsBuilder: (_, anim, _, child) {
@@ -290,18 +301,11 @@ class _ResultsScreenState extends State<ResultsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        centerTitle: true,
-        scrolledUnderElevation: 0,
-        title: Image.asset(
-          'assets/logo2.png',
-          width: 54,
-          height: 54,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.high,
-          errorBuilder: (_, _, _) => Icon(
-            Icons.speed_rounded,
-            color: context.appColors.accent,
-          ),
+        title: Text(
+          '${widget.brand} ${widget.model}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
         ),
         actions: [
           // Région picker
@@ -339,29 +343,11 @@ class _ResultsScreenState extends State<ResultsScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: Size.fromHeight(120),
+          preferredSize: Size.fromHeight(96),
           child: Container(
-            width: double.infinity,
-            padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: context.appColors.cardBorder),
-              ),
-            ),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${widget.brand} ${widget.model}'.trim(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.outfit(
-                    color: context.appColors.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
@@ -401,7 +387,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         ),
       ),
       body: ListView.builder(
-        padding: EdgeInsets.fromLTRB(12, 16, 12, 24),
+        padding: EdgeInsets.all(12),
         itemCount: _listings.length,
         itemBuilder: (context, i) => _buildListingCard(_listings[i], i),
       ),
@@ -435,13 +421,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
         child: Container(
           decoration: BoxDecoration(
             color: context.appColors.surface,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: context.appColors.cardBorder),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.14),
-                blurRadius: 22,
-                offset: Offset(0, 9),
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 8,
+                offset: Offset(0, 2),
               ),
             ],
           ),
@@ -451,7 +437,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               // --- Image ---
               ClipRRect(
                 borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(22),
+                  top: Radius.circular(16),
                 ),
                 child: listing.imageUrls.isNotEmpty
                     ? SizedBox(
@@ -538,6 +524,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
                           _specChip(Icons.local_gas_station, listing.fuel!),
                         if (listing.transmission != null)
                           _specChip(Icons.settings, listing.transmission!),
+                        _specChip(
+                          Icons.storefront_outlined,
+                          listing.marketplace,
+                          color: listing.marketplace.contains('mobile')
+                              ? context.appColors.accentOrange
+                              : context.appColors.accentPurple,
+                        ),
                         if (_has3Children)
                           _specChip(
                             Icons.family_restroom,
@@ -576,8 +569,11 @@ class _ResultsScreenState extends State<ResultsScreen> {
                             'Marché FR',
                             res.marginFRMarket,
                             res.profitFRMarket,
-                            _getRiskColor(res.marginFRMarket),
-                            comparable.count >= 3 && res.calculationReliable,
+                            comparable.isReliable
+                                ? _getRiskColor(res.marginFRMarket)
+                                : context.appColors.accentOrange,
+                            comparable.hasEstimate &&
+                                listing.hasRequiredTechnicalData,
                           ),
                         ),
                         SizedBox(width: 8),
@@ -586,19 +582,26 @@ class _ResultsScreenState extends State<ResultsScreen> {
                             'Vente rapide',
                             res.marginFRQuick,
                             res.profitFRQuick,
-                            _getRiskColor(res.marginFRQuick),
-                            comparable.count >= 3 && res.calculationReliable,
+                            comparable.isReliable
+                                ? _getRiskColor(res.marginFRQuick)
+                                : context.appColors.accentOrange,
+                            comparable.hasEstimate &&
+                                listing.hasRequiredTechnicalData,
                           ),
                         ),
                       ],
                     ),
                     SizedBox(height: 8),
                     Text(
-                      comparable.count >= 3
-                          ? '${comparable.count} annonces françaises strictes · même année, énergie et version'
-                          : 'Prix de revente masqué : moins de 3 annonces réellement comparables.',
+                      comparable.isReliable
+                          ? '${comparable.count} annonces françaises strictes · ${comparable.sources.join(' + ')}'
+                          : comparable.hasEstimate
+                          ? 'Estimation indicative sur ${comparable.count} annonce(s) · année ±1 et kilométrage élargi'
+                          : 'Aucun comparable français suffisamment proche trouvé.',
                       style: TextStyle(
-                        color: context.appColors.textMuted,
+                        color: comparable.approximate
+                            ? context.appColors.accentOrange
+                            : context.appColors.textMuted,
                         fontSize: 11,
                       ),
                     ),

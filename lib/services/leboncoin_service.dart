@@ -364,6 +364,28 @@ class LeBonCoinPriceResult {
   factory LeBonCoinPriceResult.empty() =>
       const LeBonCoinPriceResult(quick: 0, market: 0, premium: 0, count: 0);
 
+  factory LeBonCoinPriceResult.fromListings(List<LeBonCoinListing> listings) {
+    if (listings.isEmpty) return LeBonCoinPriceResult.empty();
+    final prices = listings.map((listing) => listing.price).toList()..sort();
+    final q1 = prices[(prices.length * .25).floor()];
+    final q3Index = (prices.length * .75)
+        .floor()
+        .clamp(0, prices.length - 1)
+        .toInt();
+    final q3 = prices[q3Index];
+    final middle = prices.length ~/ 2;
+    final median = prices.length.isOdd
+        ? prices[middle]
+        : (prices[middle - 1] + prices[middle]) / 2;
+    return LeBonCoinPriceResult(
+      quick: q1.roundToDouble(),
+      market: median.roundToDouble(),
+      premium: q3.roundToDouble(),
+      count: listings.length,
+      listings: listings,
+    );
+  }
+
   bool get hasData => count > 0 && market > 0;
 
   /// Construit un échantillon strict : même marque/modèle, même année, énergie
@@ -381,11 +403,18 @@ class LeBonCoinPriceResult {
     final brand = _compact(target.brand);
     final model = _compact(target.model);
 
-    final matches = listings.where((ad) {
+    bool identityMatches(LeBonCoinListing ad) {
       final title = _compact(ad.title);
-      final identityOk =
+      return
           brand.isNotEmpty && model.isNotEmpty &&
           title.contains(brand) && title.contains(model);
+    }
+
+    bool variantMatches(LeBonCoinListing ad) => targetVariant.every(
+      (token) => _variantSignature(ad.title).contains(token),
+    );
+
+    final strictMatches = listings.where((ad) {
       final yearOk = ad.year == target.year;
       final tolerance = target.mileage == null
           ? null
@@ -394,17 +423,44 @@ class LeBonCoinPriceResult {
           tolerance == null ||
           (ad.mileage != null &&
               (ad.mileage! - target.mileage!).abs() <= tolerance);
-      final variantOk = targetVariant.every(
-        (token) => _variantSignature(ad.title).contains(token),
-      );
-      return identityOk &&
+      return identityMatches(ad) &&
           yearOk &&
           mileageOk &&
           _fuelFamily(ad.fuel) == targetFuel &&
-          variantOk;
+          variantMatches(ad);
     }).toList();
 
+    if (strictMatches.length >= 3) {
+      return _estimate(strictMatches, approximate: false);
+    }
+
+    // Repli explicite et signalé : même modèle/version/énergie, année ±1 et
+    // kilométrage plus large. Le prix devient indicatif, jamais présenté comme
+    // un échantillon strict.
+    final relaxedMatches = listings.where((ad) {
+      final yearOk = ad.year != null && (ad.year! - target.year!).abs() <= 1;
+      final tolerance = target.mileage == null
+          ? null
+          : (target.mileage! * .25).round().clamp(30000, 60000);
+      final mileageOk = tolerance == null ||
+          (ad.mileage != null &&
+              (ad.mileage! - target.mileage!).abs() <= tolerance);
+      return identityMatches(ad) &&
+          yearOk &&
+          mileageOk &&
+          _fuelFamily(ad.fuel) == targetFuel &&
+          variantMatches(ad);
+    }).toList();
+
+    final matches = relaxedMatches.isNotEmpty ? relaxedMatches : strictMatches;
     if (matches.isEmpty) return ComparableMarketEstimate.empty();
+    return _estimate(matches, approximate: true);
+  }
+
+  ComparableMarketEstimate _estimate(
+    List<LeBonCoinListing> matches, {
+    required bool approximate,
+  }) {
     final prices = matches.map((ad) => ad.price).toList()..sort();
     final q1 = prices[(prices.length * .25).floor()];
     final middle = prices.length ~/ 2;
@@ -416,6 +472,8 @@ class LeBonCoinPriceResult {
       market: median.roundToDouble(),
       count: matches.length,
       listings: matches,
+      approximate: approximate,
+      sources: matches.map((listing) => listing.source).toSet(),
     );
   }
 
@@ -477,21 +535,28 @@ class ComparableMarketEstimate {
   final double market;
   final int count;
   final List<LeBonCoinListing> listings;
+  final bool approximate;
+  final Set<String> sources;
 
   const ComparableMarketEstimate({
     required this.quick,
     required this.market,
     required this.count,
     this.listings = const [],
+    this.approximate = false,
+    this.sources = const {},
   });
 
   const ComparableMarketEstimate.empty()
     : quick = 0,
       market = 0,
       count = 0,
-      listings = const [];
+      listings = const [],
+      approximate = false,
+      sources = const {};
 
-  bool get isReliable => count >= 3 && market > 0;
+  bool get hasEstimate => count > 0 && market > 0;
+  bool get isReliable => count >= 3 && market > 0 && !approximate;
 }
 
 /// Une annonce LeBonCoin simplifiée
@@ -504,6 +569,7 @@ class LeBonCoinListing {
   final String url;
   final String? imageUrl;
   final String? location;
+  final String source;
 
   const LeBonCoinListing({
     required this.title,
@@ -514,5 +580,6 @@ class LeBonCoinListing {
     this.url = '',
     this.imageUrl,
     this.location,
+    this.source = 'Leboncoin',
   });
 }

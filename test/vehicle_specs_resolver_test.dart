@@ -7,7 +7,9 @@ CarListing listing(
   int? co2,
   int? weight,
   int year = 2024,
-  int powerKW = 110,
+  int? powerKW = 110,
+  int? powerPS,
+  String marketplace = 'AutoScout24',
 }) {
   return CarListing(
     id: id,
@@ -19,9 +21,11 @@ CarListing listing(
     year: year,
     fuel: 'Benzin',
     powerKW: powerKW,
+    powerPS: powerPS,
     co2: co2,
     weightG1: weight,
     detailUrl: '/$id',
+    marketplace: marketplace,
   );
 }
 
@@ -50,5 +54,29 @@ void main() {
     ]);
     expect(result.co2, isNull);
     expect(result.weightG1, isNull);
+  });
+
+  test('retrouve le même moteur via les chevaux si les kW sont absents', () {
+    final target = listing('target', powerKW: null, powerPS: 400);
+    final result = resolver.resolve(target, [
+      target,
+      listing(
+        'a',
+        powerKW: null,
+        powerPS: 400,
+        co2: 208,
+        marketplace: 'AutoScout24',
+      ),
+      listing(
+        'b',
+        powerKW: null,
+        powerPS: 401,
+        co2: 208,
+        marketplace: 'mobile.de',
+      ),
+    ]);
+
+    expect(result.co2, 208);
+    expect(result.technicalSource, contains('2 source(s)'));
   });
 }

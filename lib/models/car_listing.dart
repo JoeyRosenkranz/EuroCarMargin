@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'vehicle_model.dart';
 
-/// Modèle pour une annonce automobile scrappée depuis AutoScout24
+/// Modèle commun aux annonces automobiles allemandes.
 class CarListing {
   final String id;
   final String title;
@@ -27,6 +27,7 @@ class CarListing {
   final int? electricRangeKm;
   final String? description; // Description textuelle de l'annonce
   final String technicalSource;
+  final String marketplace;
 
   const CarListing({
     required this.id,
@@ -52,7 +53,18 @@ class CarListing {
     this.electricRangeKm,
     this.description,
     this.technicalSource = 'Annonce AutoScout24',
+    this.marketplace = 'AutoScout24',
   });
+
+  String get absoluteDetailUrl {
+    if (detailUrl.isEmpty || detailUrl.startsWith('http')) return detailUrl;
+    final base = marketplace.toLowerCase().contains('mobile')
+        ? 'https://suchen.mobile.de'
+        : marketplace.toLowerCase().contains('france')
+        ? 'https://www.autoscout24.fr'
+        : 'https://www.autoscout24.de';
+    return '$base${detailUrl.startsWith('/') ? '' : '/'}$detailUrl';
+  }
 
   bool get hasRequiredTechnicalData {
     final energy = (fuel ?? '').toLowerCase();
@@ -85,6 +97,7 @@ class CarListing {
     int? electricRangeKm,
     String? description,
     String? technicalSource,
+    String? marketplace,
   }) {
     return CarListing(
       id: id,
@@ -111,6 +124,7 @@ class CarListing {
       electricRangeKm: electricRangeKm ?? this.electricRangeKm,
       description: description ?? this.description,
       technicalSource: technicalSource ?? this.technicalSource,
+      marketplace: marketplace ?? this.marketplace,
     );
   }
 
